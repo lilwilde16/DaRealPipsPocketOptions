@@ -1,5 +1,10 @@
 # Money Printer Bot - Pocket Options Trading Extension
 
+![Version](https://img.shields.io/badge/version-2.1.10-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Chrome Extension](https://img.shields.io/badge/chrome-extension-yellow)
+![Manifest V3](https://img.shields.io/badge/manifest-v3-orange)
+
 A Chrome browser extension designed for automated trading on Pocket Option platform using various trading strategies and signals.
 
 ## 🌟 Features
@@ -106,7 +111,11 @@ DaRealPipsPocketOptions/
 │   └── neon.css
 ├── icon/                      # Extension icons
 │   └── *.png
-└── README.md                  # This file
+├── README.md                  # This file
+├── LICENSE                    # MIT License
+├── CONTRIBUTING.md            # Contribution guidelines
+├── CHANGELOG.md               # Version history
+└── SECURITY.md                # Security policy
 ```
 
 ## ⚠️ Disclaimer
@@ -128,9 +137,16 @@ DaRealPipsPocketOptions/
 - **WebSocket**: Real-time market data communication
 - **CSS3**: Styling and animations
 
+### Documentation
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Guidelines for contributing to the project
+- **[CHANGELOG.md](CHANGELOG.md)**: Version history and release notes
+- **[SECURITY.md](SECURITY.md)**: Security policy and best practices
+- **[LICENSE](LICENSE)**: MIT License details
+
 ### Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
