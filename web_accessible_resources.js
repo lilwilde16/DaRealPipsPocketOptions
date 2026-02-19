@@ -2,8 +2,10 @@
  * This file contains the main trading bot logic and is injected into the
  * page context to enable WebSocket interception and automated trading.
  * 
- * WARNING: This is a minified/bundled file. For development, use the source
- * files before bundling. Modifying this file directly may cause issues.
+ * NOTE: This is a minified/bundled file. Source files are not included in
+ * this repository. This file should not be edited directly as it may cause
+ * issues with the trading logic. For modifications, consider refactoring
+ * after creating proper source files and a build process.
  * 
  * Core features:
  * - Trading strategy implementations (signals, candles, CCI, pin bars, martingale)
