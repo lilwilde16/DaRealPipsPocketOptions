@@ -6,8 +6,6 @@ build/
 *.zip
 
 # Development Files
-.DS_Store
-Thumbs.db
 .vscode/
 .idea/
 *.swp
@@ -41,4 +39,5 @@ logs/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
+Thumbs.db
 Desktop.ini

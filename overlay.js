@@ -1,5 +1,5 @@
 
-/* ================= MONEY PRINTER BOT - STABLE UI LOADER =================
+/* ================= MONEY PRINTER BOT - MPB UI LOADER =================
  * This script initializes the bot's user interface overlay on Pocket Option
  * trading platforms. It waits for the platform's DOM to stabilize before
  * injecting UI components to avoid conflicts with the platform's own scripts.
