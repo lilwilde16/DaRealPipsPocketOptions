@@ -1,11 +1,28 @@
 
-/* ================= MONEY PRINTER - STABLE UI LOADER ================= */
+/* ================= MONEY PRINTER BOT - STABLE UI LOADER =================
+ * This script initializes the bot's user interface overlay on Pocket Option
+ * trading platforms. It waits for the platform's DOM to stabilize before
+ * injecting UI components to avoid conflicts with the platform's own scripts.
+ * 
+ * Key responsibilities:
+ * - Wait for platform UI elements to be ready (#sub-menu-robot-modal, #ss_button)
+ * - Initialize overlay UI with controls for bot configuration
+ * - Inject CSS styling for dark neon theme
+ * - Set up toast notifications for user feedback
+ * - Configure stop loss and take profit monitoring
+ * ========================================================================= */
+
 (function MPBStableUILoader() {
+  // Guard against multiple UI initializations
   if (window.__MPB_UI_BOOT__) return;
   window.__MPB_UI_BOOT__ = true;
 
+  /**
+   * Waits for DOM to be stable before initializing UI
+   * @param {Function} cb - Callback to execute when DOM is stable
+   */
   function waitForStableDOM(cb) {
-    const targetStableFrames = 10;
+    const targetStableFrames = 10; // Require 10 consecutive successful checks
     let stableFrames = 0;
 
     const interval = setInterval(() => {
@@ -17,9 +34,9 @@
           requestAnimationFrame(cb);
         }
       } else {
-        stableFrames = 0;
+        stableFrames = 0; // Reset counter if element disappears
       }
-    }, 150);
+    }, 150); // Check every 150ms
   }
 
   waitForStableDOM(initMoneyPrinterUI);
