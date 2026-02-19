@@ -1,3 +1,22 @@
+/* ================= MONEY PRINTER BOT - UI OVERLAY ================= 
+ * This file creates and manages the visual overlay UI for the Money Printer Bot.
+ * 
+ * Purpose:
+ * - Waits for the Pocket Option platform DOM to stabilize
+ * - Injects custom CSS styling (dark neon theme)
+ * - Creates interactive controls for trading configuration
+ * - Displays real-time status, balance, and deal information
+ * - Provides toast notifications for user feedback
+ * 
+ * Key Features:
+ * - Stop-loss and take-profit controls
+ * - Strategy selection and configuration
+ * - Deal history tracking
+ * - Balance monitoring
+ * - Visual feedback for trading activity
+ * 
+ * Note: This runs at document_end and waits for platform elements to be ready.
+ * ================================================================== */
 
 /* ================= MONEY PRINTER - STABLE UI LOADER ================= */
 (function MPBStableUILoader() {
