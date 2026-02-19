@@ -1,3 +1,20 @@
+/**
+ * Money Printer Bot - UI Overlay Loader
+ * 
+ * This script manages the initialization and loading of the Money Printer Bot
+ * user interface overlay on the Pocket Option trading platform. It waits for
+ * the platform's DOM to be stable before injecting the UI components.
+ * 
+ * Key Features:
+ * - Stable DOM detection with retry logic
+ * - UI component injection
+ * - Dark neon theme styling
+ * - PnL (Profit & Loss) tracking display
+ * - Stop Loss / Take Profit controls
+ * 
+ * @requires document_end.js - jQuery and supporting libraries
+ * @requires web_accessible_resources.js - Core bot logic
+ */
 
 /* ================= MONEY PRINTER - STABLE UI LOADER ================= */
 (function MPBStableUILoader() {
