@@ -14,6 +14,7 @@ A Chrome browser extension designed for automated trading on Pocket Option platf
   - Candle pattern analysis
   - CCI (Commodity Channel Index) indicator
   - Pin bar patterns
+  - RSI Binary Strategy (RSI-6, oversold 13, overbought 82, 3-bar hold)
   - Martingale progression system
 
 - **Customizable Settings**:
