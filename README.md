@@ -23,6 +23,7 @@ A Chrome browser extension designed for automated trading on Pocket Option platf
   - Take profit targets (percentage and sum)
   - OTC market support
   - Demo/Real account switching
+  - **Pair selection**: explicitly choose which trading pairs (and OTC variants) the bot is allowed to trade
 
 - **Advanced UI**:
   - Dark neon theme interface
@@ -80,6 +81,7 @@ A Chrome browser extension designed for automated trading on Pocket Option platf
    - Configure deal limits
    - Set take profit targets
    - Enable/disable OTC trading
+   - **Select trading pairs**: In the "Trading Pairs" tile, click the pairs you want the bot to scan and trade. **At least one pair must be selected — the bot will not trade if no pairs are selected.** Use the "Select All", "Clear All", "Live Only", or "OTC Only" quick-buttons for convenience. Selections are persisted automatically.
 
 4. **Start Trading**: Click the start button to begin automated trading
 
@@ -96,6 +98,7 @@ A Chrome browser extension designed for automated trading on Pocket Option platf
 | Take Profit | Profit target percentage | 20% |
 | Use OTC | Trade in OTC markets | Enabled |
 | Use Martin | Enable Martingale system | Disabled |
+| Selected Pairs | Pairs the bot is allowed to trade (explicit selection required; **no trading occurs if the list is empty**) | None (must be configured) |
 
 ## 📁 Project Structure
 
