@@ -5,6 +5,17 @@ All notable changes to the Money Printer Bot extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-02-20
+
+### Added
+- **Pair-Selection UI**: New "Trading Pairs" tile in the bot modal lets users explicitly choose which pairs (including OTC variants) the bot is allowed to scan and trade.
+  - Toggle individual pair pills (Forex majors, crosses, Gold/Silver, and OTC versions)
+  - Quick-action buttons: Select All, Clear All, Live Only, OTC Only
+  - A warning message is shown when no pairs are selected, reminding the user that the bot will not trade
+  - Selections persist via `localStorage` (`mpb_selected_pairs`) and are synced to the bot engine via `postMessage` on load
+- **Explicit pair-selection requirement enforced across all strategies**: `checkDial()` now blocks trading for any pair that is not in `selected_pairs`, regardless of which strategy is active (signals, candles, CCI, pinBar, RSI Binary, martin/useMartin). An empty `selected_pairs` list means no trading occurs.
+- `selected_pairs: []` added to default bot settings object (empty = no pairs allowed until user selects)
+
 ## [2.2.0] - 2026-02-20
 
 ### Added
