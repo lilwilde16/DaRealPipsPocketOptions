@@ -5,7 +5,7 @@
 If you discover a security vulnerability in Money Printer Bot, please report it responsibly:
 
 1. **Do NOT** open a public GitHub issue
-2. Email the maintainers directly with details
+2. Use [GitHub's private security advisory feature](https://github.com/lilwilde16/DaRealPipsPocketOptions/security/advisories/new) to report the vulnerability privately
 3. Include steps to reproduce the vulnerability
 4. Allow reasonable time for a fix before public disclosure
 

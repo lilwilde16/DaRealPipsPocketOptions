@@ -2,7 +2,7 @@
   "update_url": "https://clients2.google.com/service/update2/crx",
   "manifest_version": 3,
   "name": "Money Printer Bot",
-  "version": "2.1.10",
+  "version": "2.3.0",
   "author": "Jash",
   "description": "Money Printer Bot",
   "short_name": "Money Printer Bot",
@@ -76,6 +76,7 @@
       "https://platform58.po2.capital/*",
       "https://p.finance/*",
       "https://po.company/*",
+      "https://po1.capital/*",
       "https://pocket-link22.co/*"
     ]
   },

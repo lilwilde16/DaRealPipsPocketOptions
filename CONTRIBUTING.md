@@ -25,8 +25,11 @@ Feature requests are welcome! Please:
 ### Code Contributions
 
 1. **Fork the repository**
+   - Go to https://github.com/lilwilde16/DaRealPipsPocketOptions and click **Fork**
+   - Then clone your fork locally:
    ```bash
-   git fork https://github.com/lilwilde16/DaRealPipsPocketOptions.git
+   git clone https://github.com/YOUR-USERNAME/DaRealPipsPocketOptions.git
+   cd DaRealPipsPocketOptions
    ```
 
 2. **Create a feature branch**
@@ -98,12 +101,13 @@ Feature requests are welcome! Please:
 
 ## 🔍 Development Setup
 
-1. Clone the repository
-2. Enable Chrome Developer Mode (`chrome://extensions/`)
-3. Load unpacked extension
-4. Make changes
-5. Reload extension to test
-6. Check browser console for errors
+1. Clone the repository (see [Code Contributions](#code-contributions) above for fork instructions)
+2. No build step is required — this is a Chrome extension loaded directly from source
+3. Enable Chrome Developer Mode (`chrome://extensions/`)
+4. Click **Load unpacked** and select the repository folder
+5. Make changes to the source files
+6. Click the **↺ Reload** icon on the extension card at `chrome://extensions/` to apply changes
+7. Check the browser console for errors (right-click the Pocket Option page → Inspect → Console)
 
 ## 🚫 What Not to Do
 
