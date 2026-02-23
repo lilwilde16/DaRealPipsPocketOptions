@@ -20,6 +20,18 @@
         "https://po1.capital/*",
         "https://pocket-link22.co/*"
       ],
+      "exclude_matches": [
+        "https://pocketoption.com/*/login/",
+        "https://pocketoption.com/*/login",
+        "https://pocketoption.com/*/register/",
+        "https://pocketoption.com/*/register",
+        "https://pocketoption.com/*/registration/",
+        "https://pocketoption.com/*/registration",
+        "https://pocketoption.com/*/sign-up/",
+        "https://pocketoption.com/*/sign-up",
+        "https://pocketoption.com/*/sign-in/",
+        "https://pocketoption.com/*/sign-in"
+      ],
       "js": [
         "document_end.js"
       ],
@@ -34,6 +46,18 @@
         "https://po1.capital/*",
         "https://pocket-link22.co/*"
       ],
+      "exclude_matches": [
+        "https://pocketoption.com/*/login/",
+        "https://pocketoption.com/*/login",
+        "https://pocketoption.com/*/register/",
+        "https://pocketoption.com/*/register",
+        "https://pocketoption.com/*/registration/",
+        "https://pocketoption.com/*/registration",
+        "https://pocketoption.com/*/sign-up/",
+        "https://pocketoption.com/*/sign-up",
+        "https://pocketoption.com/*/sign-in/",
+        "https://pocketoption.com/*/sign-in"
+      ],
       "js": [
         "document_start.js"
       ],
@@ -47,6 +71,18 @@
         "https://po.company/*",
         "https://po1.capital/*",
         "https://pocket-link22.co/*"
+      ],
+      "exclude_matches": [
+        "https://pocketoption.com/*/login/",
+        "https://pocketoption.com/*/login",
+        "https://pocketoption.com/*/register/",
+        "https://pocketoption.com/*/register",
+        "https://pocketoption.com/*/registration/",
+        "https://pocketoption.com/*/registration",
+        "https://pocketoption.com/*/sign-up/",
+        "https://pocketoption.com/*/sign-up",
+        "https://pocketoption.com/*/sign-in/",
+        "https://pocketoption.com/*/sign-in"
       ],
       "js": [
         "overlay.js"
