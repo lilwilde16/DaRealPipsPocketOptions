@@ -1,6 +1,6 @@
 # Money Printer Bot - Pocket Options Trading Extension
 
-![Version](https://img.shields.io/badge/version-2.1.10-blue)
+![Version](https://img.shields.io/badge/version-2.3.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Chrome Extension](https://img.shields.io/badge/chrome-extension-yellow)
 ![Manifest V3](https://img.shields.io/badge/manifest-v3-orange)
@@ -134,6 +134,25 @@ DaRealPipsPocketOptions/
 
 ## 🛠️ Development
 
+### Prerequisites
+
+- Google Chrome browser (version 88 or higher)
+- No build tools or Node.js required — the extension is loaded directly from source files
+
+### Local Setup & Testing
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/lilwilde16/DaRealPipsPocketOptions.git
+   cd DaRealPipsPocketOptions
+   ```
+2. Open Chrome and go to `chrome://extensions/`
+3. Enable **Developer mode** (toggle in the top-right corner)
+4. Click **Load unpacked** and select the repository folder
+5. Visit a supported Pocket Option URL (see [Usage](#-usage))
+6. After making code changes, click the **↺ Reload** icon on the extension card to apply them
+7. Check the browser console for errors (right-click the trading page → Inspect → Console)
+
 ### Technologies Used
 
 - **JavaScript**: Core extension logic
@@ -173,6 +192,6 @@ For bug reports and feature requests, please open an issue on GitHub.
 
 ---
 
-**Version**: 2.1.10  
+**Version**: 2.3.0  
 **Author**: Jash  
 **Last Updated**: February 2026
