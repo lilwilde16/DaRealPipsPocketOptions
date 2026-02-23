@@ -15,6 +15,7 @@ A Chrome browser extension designed for automated trading on Pocket Option platf
   - CCI (Commodity Channel Index) indicator
   - Pin bar patterns
   - RSI Binary Strategy (RSI-6, oversold 13, overbought 82, 3-bar hold)
+  - RSI 30s Dual Strategy (RSI-6 crossover confirmed by RSI-14, on 30-second candles)
   - Martingale progression system
 
 - **Customizable Settings**:

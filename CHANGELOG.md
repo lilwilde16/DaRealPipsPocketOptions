@@ -5,6 +5,21 @@ All notable changes to the Money Printer Bot extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-02-23
+
+### Added
+- **RSI 30s Dual Strategy** (`rsiDual30s`): New strategy using two RSI indicators on 30-second candles for higher-confidence entries.
+  - **RSI(6)** with oversold threshold 13 / overbought threshold 82 acts as the trigger (crossover/crossunder).
+  - **RSI(14)** with oversold threshold 30 / overbought threshold 70 acts as the confirmation filter — trade only fires when RSI(14) is already past its threshold in the same direction.
+  - Aggregates tick data into 30-second candles (independent `rates30s` per asset) for both RSI calculations.
+  - CALL (up): RSI(6) crosses below 13 **and** RSI(14) < 30.
+  - PUT (down): RSI(6) crosses above 82 **and** RSI(14) > 70.
+  - Enforces a 30-second hold period after each entry to prevent overlapping trades.
+  - Respects the pair-selection list — no trades if no pairs are selected, and only selected pairs are traded.
+  - `rsiDual30s` option injected into the native strategy select dropdown via DOM observer.
+  - `rsi30s` helper function added to `strategies` object for 30-second RSI calculation.
+  - Per-asset `rates30s` candle store and `rsi_prev14` state added to `checkRate` initialisation.
+
 ## [2.3.0] - 2026-02-20
 
 ### Added
