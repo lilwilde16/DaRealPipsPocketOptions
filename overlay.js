@@ -17,8 +17,19 @@
  */
 
 /* ================= MONEY PRINTER - STABLE UI LOADER ================= */
+
+// Shared auth-page guard: returns true if the current page is a login/auth page
+// where the bot UI must NOT be injected.
+function mpbIsAuthPage() {
+  return /\/(login|register|registration|sign-up|sign-in)(\/|$)/i.test(window.location.pathname);
+}
+
 (function MPBStableUILoader() {
   if (window.__MPB_UI_BOOT__) return;
+
+  // Only run on trading/cabinet pages — skip login, register, and other auth pages
+  if (mpbIsAuthPage()) return;
+
   window.__MPB_UI_BOOT__ = true;
 
   function waitForStableDOM(cb) {
@@ -45,6 +56,10 @@
 function initMoneyPrinterUI() {
   try {
     if (window.__MPB_UI_ACTIVE__) return;
+
+    // Only inject UI on trading/cabinet pages — never on login or auth pages
+    if (mpbIsAuthPage()) return;
+
     window.__MPB_UI_ACTIVE__ = true;
 
 
@@ -53,6 +68,10 @@ function initMoneyPrinterUI() {
 ================================================================== */
 (function MPBWaitForPlatform() {
   if (window.__MPB_BOOTSTRAP__) return;
+
+  // Only run on trading/cabinet pages — skip login, register, and other auth pages
+  if (mpbIsAuthPage()) return;
+
   window.__MPB_BOOTSTRAP__ = true;
 
   var tries = 0;
@@ -75,7 +94,10 @@ function initMoneyPrinterUI() {
       });
     } else if (tries > MAX_TRIES) {
       clearInterval(timer);
-      initMoneyPrinterUI();
+      // Only fall back to injecting UI if the platform trading elements are present
+      if (document.querySelector('#sub-menu-robot-modal') || document.getElementById('ss_button')) {
+        initMoneyPrinterUI();
+      }
     }
   }, 100);
 })();
@@ -818,6 +840,8 @@ function initMoneyPrinterUI() {
 
   function safeReboot(){
     try {
+      // Do not reattach on login/auth pages
+      if (mpbIsAuthPage()) return;
       if (
         !document.getElementById('mpb-dock-simple') ||
         !document.getElementById('mpb-pnl-top')
@@ -858,6 +882,8 @@ function initMoneyPrinterUI() {
   window.__MPB_REBINDER__ = true;
 
   function rebind() {
+    // Do not rebind on login/auth pages
+    if (mpbIsAuthPage()) return;
     const modal = document.querySelector('#sub-menu-robot-modal');
     if (!modal && window.__MPB_UI_ACTIVE__) {
       window.__MPB_UI_ACTIVE__ = false;

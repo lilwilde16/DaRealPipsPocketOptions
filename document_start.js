@@ -13,6 +13,10 @@
 (function () {
   // Prevent double injection
   if (window.__MPB_ENGINE_INJECTED__) return;
+
+  // Only run on trading/cabinet pages — skip login, register, and other auth pages
+  if (/\/(login|register|registration|sign-up|sign-in)(\/|$)/i.test(window.location.pathname)) return;
+
   window.__MPB_ENGINE_INJECTED__ = true;
 
   // Create and inject the main bot script

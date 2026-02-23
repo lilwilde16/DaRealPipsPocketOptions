@@ -76,6 +76,8 @@ A Chrome browser extension designed for automated trading on Pocket Option platf
 
 2. **Open the Bot Interface**: Click on the extension icon or look for the bot overlay on the trading page
 
+   > **Note**: The bot UI only appears on the cabinet/trading pages (e.g. `https://pocketoption.com/en/cabinet/…`). It will **not** inject on the login, register, or other authentication pages.
+
 3. **Configure Settings**:
    - Choose your trading strategy
    - Set minimum profit threshold
