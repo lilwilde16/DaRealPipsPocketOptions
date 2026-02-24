@@ -170,6 +170,45 @@ DaRealPipsPocketOptions/
 └── SECURITY.md                # Security policy
 ```
 
+## 🧪 Testing the Demo Test Trade
+
+The **System Check** tile (accessible from the bot panel) includes a **⚡ Place Demo Test Trade ($1)** button that sends a real $1 CALL order on your demo account to verify the WebSocket integration end-to-end.
+
+### How to trigger it
+
+1. Make sure you are on the **demo** account on a supported Pocket Option URL.
+2. Open the bot panel and navigate to the **System Check** tile.
+3. Click **⚡ Place Demo Test Trade ($1)** once — a confirmation prompt appears.
+4. Click the button again within 5 seconds to confirm.
+5. A toast notification and a log entry `[MPB] demo test trade sent for pair: <PAIR>` confirm the order was dispatched.
+
+### Where to view logs and network traffic
+
+| What to inspect | Where to look |
+|---|---|
+| Extension console logs (`[MPB] …`) | Trading page → DevTools (F12) → **Console** tab |
+| WebSocket frames (sent/received) | Trading page → DevTools → **Network** tab → filter by **WS** → click the socket → **Messages** |
+| Service-worker logs | `chrome://extensions` → Money Printer Bot → **service worker** → **Inspect** → Console |
+
+> **Note**: The WebSocket is created and managed in **page context** (via `web_accessible_resources.js`), not inside the extension service worker. WS frames therefore appear in the *page's* Network tab, not the service worker's.
+
+### Enabling debug logging
+
+Set `window.__mpbDebug = true` in the page console before triggering a test trade. This registers a one-shot listener that prints the broker's next WS response to the console, letting you verify whether the server acknowledged or rejected the order:
+
+```
+[MPB][demo-trade-ack] server response: 451-["successopenOrder", {...}]
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `⚠ WebSocket not captured` | WS not yet established | Interact with the page (e.g. switch pair) then retry |
+| `⚠ WebSocket not ready (readyState=0)` | WS still connecting | Wait a few seconds and retry |
+| `⚠ Demo test trade blocked` | Not on demo account | Switch to the Demo balance in PocketOption |
+| No WS frame in Network tab | WS closed or reconnecting | Reload the page and retry |
+
 ## ⚠️ Disclaimer
 
 **IMPORTANT**: This software is provided for educational purposes only. 
