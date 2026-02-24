@@ -5,6 +5,26 @@ All notable changes to the Money Printer Bot extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-02-24
+
+### Fixed
+- **Money Printer icon (`#robot_icon`) now correctly opens the native PocketOption robot modal** (`#sub-menu-robot-modal`). Clicking the icon triggers the native modal, reveals it if hidden, and dispatches the `mpb-icon-clicked` custom event so dependent UI can mount.
+- **Removed CSS rules that hid `.mpb-header` and `.mpb-tile`** in `overlay.js`, which were blocking the modal tiles from being visible as the primary control surface.
+- **Removed duplicate `.mpb-header{display:none!important}` rule** in `web_accessible_resources.js` that suppressed the header bar.
+
+### Added
+- **System Check tile** (`#mpb-sys-check`): appears in the `#mpb-slot` slot of the robot modal **only after the Money Printer icon is clicked**.
+  - "Run System Check" button performs the following checks and displays pass/fail results:
+    1. **Engine injected** — verifies `window.__MPB_ENGINE_INJECTED__` from `document_start.js`.
+    2. **Trading pairs selected** — reads `localStorage.mpb_selected_pairs`; warns clearly when empty (bot will not trade).
+    3. **Data stream heartbeat** — detects whether any `belobot` postMessage events have been received from the WebSocket proxy.
+    4. **Required DOM nodes** — checks that `#sub-menu-robot-modal` and `#ss_button` are present in the page.
+- **Demo-only test trade (Option B)**:
+  - "Place Demo Test Trade ($1)" button shown **only when demo mode is detected** after running the System Check.
+  - Requires an **explicit two-click confirmation** (second click within 5 seconds); times out otherwise with no trade placed.
+  - An additional demo-mode guard is applied immediately before the trade signal is dispatched; the button cannot place trades on real accounts.
+  - Sends a `belobot` postMessage (`mpb_demo_test_trade`) to the engine with `amount: 1` and `isDemo: true`.
+
 ## [2.4.0] - 2026-02-23
 
 ### Added
