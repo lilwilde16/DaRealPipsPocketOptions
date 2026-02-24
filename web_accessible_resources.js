@@ -1,5 +1,5 @@
 (function(){try{
-(()=>{"use strict";const t={settings:{strategy:"signals",min_profit:80,delay:0,deals_limit:10,take_profit:{percent:20,sum:0},signals:[2,2,1,0,0,0],use_otc:!0,started:!1,martinSteps:[2,2,2,2,2],useMartin:!1,selected_pairs:[],bcCooldownMinutes:10},rates:{},action:!1,userInfo:{uid:!1,isDemo:!0,balance:{demo:0,real:0},openedDials:0,futureDeals:[],onlyDemo:!1,robotDeals:{opened:[],closed:[]},startSum:!1,martinState:{}},getNextMartingaleStep(t,e){let s=t;for(let t=0;t<this.settings.martinSteps.length;t++){if(e===s)return Math.floor(s*this.settings.martinSteps[t]*100)/100;s=Math.floor(this.settings.martinSteps[t]*s*100)/100}return 2*e},checkDial(e,s){if(!this.settings.started)return!1;if("otc"==e.slice(-3)&&!this.settings.use_otc)return!1;if(!this.settings.selected_pairs||!this.settings.selected_pairs.length||!this.settings.selected_pairs.includes(e))return!1;if(!this.rates[e].active)return!1;if(this.userInfo.openedDials+this.userInfo.futureDeals.length>=this.settings.deals_limit)return!1;if(this.rates[e].nextDealTime>new Date)return!1;if(this.rates[e].profit<this.settings.min_profit)return!1;if(this.userInfo.isDemo&&this.userInfo.balance.real>=this.settings.take_profit.sum)return this.settings.started=!1,window.postMessage({belobot:!0,act:"robotSettings",settings:t.settings},window.location.href),!1;if(!this.userInfo.isDemo&&this.userInfo.balance.real>=this.settings.take_profit.sum)return this.settings.started=!1,window.postMessage({belobot:!0,act:"robotSettings",settings:t.settings},window.location.href),!1;if("updateStream"==this.action){if("candles"==this.settings.strategy){let t=this.strategies.candles(this.rates[e].rates,Math.trunc(s),4);t&&("down"==t?this.deal(e,"up"):this.deal(e,"down"))}if("cci"==this.settings.strategy){let t=this.strategies.cci(this.rates[e].rates,Math.trunc(s),20);t&&(t<115&&this.rates[e].last_cci>115&&this.deal(e,"down"),t>-105&&this.rates[e].last_cci<-105&&this.deal(e,"up"),this.rates[e].last_cci=t)}if("pinBar"==this.settings.strategy){let t=this.strategies.pinBar(this.rates[e].rates,Math.trunc(s),4);t&&this.deal(e,t)}if("rsiBinary"==this.settings.strategy){const r=this.strategies.rsiBinary(this.rates[e].rates,Math.trunc(s),6);if(r!==!1){const c=this.rates[e].rsi_prev;if(c!==!1){if(c>=13&&r<13){this.deal(e,"up");const p=new Date;p.setSeconds(p.getSeconds()+180);this.rates[e].nextDealTime=p}if(c<=82&&r>82){this.deal(e,"down");const p=new Date;p.setSeconds(p.getSeconds()+180);this.rates[e].nextDealTime=p}}this.rates[e].rsi_prev=r}}if("binaryContinuation"==this.settings.strategy){if(!this.userInfo.martinState[e])this.userInfo.martinState[e]={};var _ms=this.userInfo.martinState[e];if(!_ms.bcStopped){if(_ms.bcCooldown&&Date.now()<_ms.bcCooldown){}else{if(_ms.bcCooldown&&Date.now()>=_ms.bcCooldown)_ms.bcCooldown=null;var _sig=this.strategies.binaryContinuation(this.rates[e].rates,Math.trunc(s));if(_sig!==!1){var _amt=_ms.bcWait&&_ms.bcNextAmt?_ms.bcNextAmt:void 0;_ms.bcWait=!1;this.deal(e,_sig,_amt)}}}}}if("signals"==this.action&&"signals"==this.settings.strategy){let t=this.strategies.signals(this.rates[e].signals,this.settings.signals);t&&this.deal(e,t)}},check_reg(t){var e=this,s=new XMLHttpRequest;s.open("POST","https://2bot.top/check_user/",!0),s.setRequestHeader("Content-type","application/json; charset=utf-8"),s.onreadystatechange=function(){if(s.readyState==XMLHttpRequest.DONE)if(200==s.status){var t=JSON.parse(s.response);t.confirm?e.userInfo.onlyDemo=!1:e.userInfo.onlyDemo=!0,window.postMessage({belobot:!0,info_text:t.message})}else window.postMessage({belobot:!0,info_text:'Server <a href="https://2bot.top">https://2bot.top</a> is not available. Please report a problem trader.vitaly@gmail.com'})},s.send(JSON.stringify({user_id:t}))},deal(t,e,s){if((this.settings.useMartin||"martin"===this.settings.strategy)&&!s&&this.userInfo.martinState[t]&&this.userInfo.martinState[t].nextAmount)s=this.userInfo.martinState[t].nextAmount;e="up"==e?"call":"put",this.userInfo.futureDeals.push({pair:t,dur:e,sum:s});let a=new Date;a.setSeconds(a.getSeconds()+this.settings.delay),this.rates[t].nextDealTime=a,window.postMessage({belobot:!0,act:"newDeal"},window.location.href)},addRate(t){this.rates[t.name].rates[t.elm[0]]=[t.elm[1],t.elm[2],t.elm[3],t.elm[4]]},addCurrentRate(t){var e=60*parseInt(t.elm[0]/60);this.checkRate(t.name),null==this.rates[t.name].rates[e]&&(this.rates[t.name].rates[e]=[t.elm[1],t.elm[1],t.elm[1],t.elm[1]]),t.elm[1]>this.rates[t.name].rates[e][2]?this.rates[t.name].rates[e][2]=t.elm[1]:t.elm[1]<this.rates[t.name].rates[e][3]&&(this.rates[t.name].rates[e][3]=t.elm[1]),this.rates[t.name].rates[e][1]=t.elm[1]},checkRate(t){null==this.rates[t]&&(this.rates[t]={rates:{}}),null==this.rates[t].signals&&(this.rates[t].signals={}),null==this.rates[t].nextDealTime&&(this.rates[t].nextDealTime=new Date),null==this.rates[t].last_cci&&(this.rates[t].last_cci=!1),null==this.rates[t].rsi_prev&&(this.rates[t].rsi_prev=!1)},update(e){return"updateHistory"==this.action&&(this.checkRate(e.asset),e.candles.forEach((function(t){this.addRate({name:e.asset,elm:t})}),this),e.history.forEach((function(t){this.addCurrentRate({name:e.asset,elm:t})}),this)),"updateStream"==this.action&&e.forEach((function(t){this.checkRate(t[0]),this.addCurrentRate({name:t[0],elm:[t[1],t[2]]}),this.checkDial(t[0],t[1])}),this),"updateAssets"==this.action&&e.forEach((function(t){this.checkRate(t[1]),this.rates[t[1]].profit=t[5],this.rates[t[1]].active=t[14],this.rates[t[1]].fullname=t[2]}),this),"updateBalance"==this.action&&(this.userInfo.uid||(this.userInfo.uid=AppData.uid,this.check_reg(this.userInfo.uid)),e.isDemo?this.userInfo.balance.real=e.balance:this.userInfo.balance.real=e.balance,this.userInfo.isDemo=e.isDemo),"updateOpenedDeals"===this.action&&(this.userInfo.openedDials=e.length),"successopenOrder"===this.action&&this.settings.started&&this.userInfo.robotDeals.opened.push(e.id),"successcloseOrder"===this.action&&(e.deals.forEach((function(t){var e=this.userInfo.robotDeals.opened.indexOf(t.id);if(e>-1&&(this.userInfo.robotDeals.opened.splice(e,1),this.userInfo.robotDeals.closed.push(t.profit),("martin"===this.settings.strategy||this.settings.useMartin)&&this.settings.started)){if(t.profit<0){let _ms=this.userInfo.martinState[t.asset]||{step:0};_ms.step<5?this.userInfo.martinState[t.asset]={step:_ms.step+1,nextAmount:Math.floor(t.amount*2*100)/100}:this.userInfo.martinState[t.asset]={step:0,nextAmount:null}}else if(t.profit>0)this.userInfo.martinState[t.asset]={step:0,nextAmount:null}}if(e>-1&&"binaryContinuation"===this.settings.strategy&&this.settings.started){if(!this.userInfo.martinState[t.asset])this.userInfo.martinState[t.asset]={};var _bcms=this.userInfo.martinState[t.asset];if(t.profit<0){var _step=(_bcms.bcStep||0)+1;_bcms.bcStep=_step;_bcms.bcNextAmt=Math.floor(t.amount*2*100)/100;_bcms.bcWait=!0;if(_step>=4)_bcms.bcStopped=!0;else if(_step>=3)_bcms.bcCooldown=Date.now()+(this.settings.bcCooldownMinutes||10)*60000}else if(t.profit>0){_bcms.bcStep=0;_bcms.bcNextAmt=null;_bcms.bcWait=!1;_bcms.bcStopped=!1;_bcms.bcCooldown=null}}this.userInfo.openedDials--}),this),window.postMessage({belobot:!0,robotDeals:t.userInfo.robotDeals},window.location.href)),"signals"===this.action&&e.signals.forEach((function(t){this.checkRate(t[0]),t[1].forEach((function(e){this.rates[t[0]].signals[e[0]]=e[1]}),this),this.checkDial(t[0])}),this),this.action=!1,!1},getState(){window.postMessage({belobot:!0,data:{settings:this.settings}},window.location.href)},setState(t){for(var e in t)this.settings=t[e]},strategies:{cci:function(t,e,s){if(t.length<s)return!1;let a=[],i=60*parseInt(e/60);for(let e=i-60*(s-1);e<=i;e+=60)a.push(t[e]);const n=a.map((t=>(t[0]+t[2]+t[3]+t[1])/4)),r=n.reduce(((t,e)=>t+e),0)/s,o=n.reduce(((t,e)=>t+Math.abs(e-r)),0)/s;return(n[s-1]-r)/(.02*o)},candles:function(t,e,s){var a=!1;for(let i=0,n=60*parseInt(e/60);i<=s;i++,n-=60){if(null==t[n])return!1;if(t[n][0]==t[n][1])return!1;if(t[n][0]<t[n][1])if(a){if("down"==a)return!1}else a="up";if(t[n][0]>t[n][1])if(a){if("up"==a)return!1}else a="down"}return a},pinBar:function(t,e,s){let a=60*parseInt(e/60),i=new Date(1e3*e).getSeconds(),n=t[a];if(i<40)return!1;const r=Math.abs(n[1]-n[0]),o=n[2]-Math.max(n[0],n[1]),l=Math.min(n[0],n[1])-n[3];return o>l&&o>r*s?"down":o<l&&l>r*s&&"up"},signals:function(t,e){let s=[t[1],t[2],t[3],t[5],t[10],t[15]],a=!1;for(var i=0;i<s.length;i++)if(0!=e[i]){if(s[i]>0)if(s[i]>2){if("up"==a)return!1;a||(a="down"),s[i]-=2}else{if("down"==a)return!1;a||(a="up")}if(s[i]<e[i])return!1}return a},rsiBinary:function(t,e,s){const a=[];const i=60*Math.floor(e/60);for(let r=s;r>=0;r--){const n=t[i-60*r];if(!n)return!1;a.push(n[1])}let o=0,l=0;for(let r=1;r<=s;r++){const n=a[r]-a[r-1];n>0?o+=n:l-=n}o/=s;l/=s;if(l===0)return o===0?50:100;const c=o/l;return 100-(100/(1+c))},binaryContinuation:function(rates,currentTs){function _ema(arr,p){if(arr.length<p)return null;var k=2/(p+1),v=arr[0];for(var i=1;i<arr.length;i++)v=arr[i]*k+v*(1-k);return v}function _rsi(arr,p){if(arr.length<p+1)return null;var g=0,l=0,n=arr.length;for(var i=n-p;i<n;i++){var d=arr[i]-arr[i-1];if(d>0)g+=d;else l-=d}g/=p;l/=p;if(l===0)return 100;return 100-100/(1+g/l)}function _m5(n){var res=[],t=Math.floor(currentTs/300)*300;while(res.length<n&&t>0){var o=null,c=null,h=-Infinity,lo=Infinity;for(var m=t;m<t+300;m+=60){if(rates[m]){if(o===null)o=rates[m][0];c=rates[m][1];if(rates[m][2]>h)h=rates[m][2];if(rates[m][3]<lo)lo=rates[m][3]}}if(o!==null)res.unshift([o,c,h,lo]);t-=300}return res}function _m1(n){var res=[],t=Math.floor(currentTs/60)*60;while(res.length<n&&t>0){if(rates[t])res.unshift(rates[t]);t-=60}return res}var m5=_m5(250);if(m5.length<220)return!1;var m5c=m5.map(function(c){return c[1]});var ema200=_ema(m5c,200);if(!ema200)return!1;var ema200p=_ema(m5c.slice(0,m5c.length-5),200);if(!ema200p)return!1;var slope=ema200>ema200p?'up':ema200<ema200p?'down':'flat';var price=m5c[m5c.length-1];var r14=_rsi(m5c,14);if(r14===null)return!1;var dir=null;if(price>ema200&&slope==='up'&&r14>55)dir='up';else if(price<ema200&&slope==='down'&&r14<45)dir='down';if(!dir)return!1;var m1=_m1(35);if(m1.length<25)return!1;var m1c=m1.map(function(c){return c[1]});var ema20=_ema(m1c,20);if(!ema20)return!1;var cur=m1[m1.length-1],prev=m1[m1.length-2];if(!cur||!prev)return!1;var dm=m1.slice(m1.length-15);if(dm.length<15)return!1;var pd=0,md=0,tr=0;for(var i=1;i<dm.length;i++){var h=dm[i][2],l=dm[i][3],ph=dm[i-1][2],pl=dm[i-1][3],pc=dm[i-1][1];var up=h-ph,dn=pl-l;pd+=(up>dn&&up>0)?up:0;md+=(dn>up&&dn>0)?dn:0;tr+=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc))}if(!tr)return!1;var pdi=100*pd/tr,mdi=100*md/tr;if(dir==='up'&&cur[1]>cur[0]&&cur[1]>ema20&&pdi>mdi&&cur[1]>prev[2])return'up';if(dir==='down'&&cur[1]<cur[0]&&cur[1]<ema20&&mdi>pdi&&cur[1]<prev[3])return'down';return!1}}},e=t;window.addEventListener("message",(function(t){if(t.data.belobot){if("readState"==t.data.act&&window.postMessage({belobot:!0,act:"robotSettings",settings:e.settings},window.location.href),"setState"==t.data.act)for(let s in t.data.settings)"take_profit"==s?e.settings.take_profit.percent=t.data.settings[s]:e.settings[s]=t.data.settings[s];if("start_stop"==t.data.act){if(false&&e.userInfo.onlyDemo)return!1;e.userInfo.isDemo?e.settings.take_profit.sum=Math.floor(e.userInfo.balance.real*(e.settings.take_profit.percent+100)/100):e.settings.take_profit.sum=Math.floor(e.userInfo.balance.real*(e.settings.take_profit.percent+100)/100),e.settings.started=!e.settings.started,e.userInfo.futureDeals=[],e.userInfo.martinState={},e.settings.started||window.postMessage({belobot:!0,robotDeals:e.userInfo.robotDeals},window.location.href)}}}));var s=window.WebSocket;window.WebSocket=function(t,a){var i=a?new s(t,a):new s(t);return i.addEventListener("open",(function(t){})),i.addEventListener("message",(function(t){if(t.data instanceof ArrayBuffer&&e.action){let a=JSON.parse((s=t.data,String.fromCharCode.apply(null,new Uint8Array(s))));e.update(a)}else if(t.data.length>6)try{let s=JSON.parse(t.data.slice(4));"updateHistoryNew"===s[0]?e.action="updateHistory":"updateStream"===s[0]?e.action="updateStream":"updateAssets"===s[0]?e.action="updateAssets":"successupdateBalance"===s[0]?e.action="updateBalance":"updateOpenedDeals"===s[0]?e.action="updateOpenedDeals":"successopenOrder"===s[0]?e.action="successopenOrder":"successcloseOrder"===s[0]?e.action="successcloseOrder":"upsignals"!==s[0]&&"updateSignalForecast"!==s[0]&&"signals/load"!==s[0]&&"signals/update"!==s[0]||(e.action="signals")}catch{}var s})),i.addEventListener("send",(function(t){})),i.oldSend=s.prototype.send,i.send=function(t){if(e.settings.started&&(e.userInfo.futureDeals.length>0||!e.userInfo.startSum)&&"["==t[2])try{var s=JSON.parse(t.slice(2)),a=e.userInfo.futureDeals.pop(),n=t.slice(0,2);e.userInfo.startSum=s[1].amount,s[1].asset=a.pair,s[1].action=a.dur,a.sum&&(s[1].amount=a.sum),e.userInfo.onlyDemo&&(s[1].isDemo=1),n+=JSON.stringify(s),e.userInfo.openedDials++,i.oldSend.apply(this,[n])}catch{i.oldSend.apply(this,[t])}else i.oldSend.apply(this,[t])},i}})();
+(()=>{"use strict";const t={settings:{strategy:"signals",min_profit:80,delay:0,deals_limit:10,take_profit:{percent:20,sum:0},signals:[2,2,1,0,0,0],use_otc:!0,started:!1,martinSteps:[2,2,2,2,2],useMartin:!1,selected_pairs:[],bcCooldownMinutes:10},rates:{},action:!1,userInfo:{uid:!1,isDemo:!0,balance:{demo:0,real:0},openedDials:0,futureDeals:[],onlyDemo:!1,robotDeals:{opened:[],closed:[]},startSum:!1,martinState:{}},getNextMartingaleStep(t,e){let s=t;for(let t=0;t<this.settings.martinSteps.length;t++){if(e===s)return Math.floor(s*this.settings.martinSteps[t]*100)/100;s=Math.floor(this.settings.martinSteps[t]*s*100)/100}return 2*e},checkDial(e,s){if(!this.settings.started)return!1;if("otc"==e.slice(-3)&&!this.settings.use_otc)return!1;if(!this.settings.selected_pairs||!this.settings.selected_pairs.length||!this.settings.selected_pairs.includes(e))return!1;if(!this.rates[e].active)return!1;if(this.userInfo.openedDials+this.userInfo.futureDeals.length>=this.settings.deals_limit)return!1;if(this.rates[e].nextDealTime>new Date)return!1;if(this.rates[e].profit<this.settings.min_profit)return!1;if(this.userInfo.isDemo&&this.userInfo.balance.real>=this.settings.take_profit.sum)return this.settings.started=!1,window.postMessage({belobot:!0,act:"robotSettings",settings:t.settings},window.location.href),!1;if(!this.userInfo.isDemo&&this.userInfo.balance.real>=this.settings.take_profit.sum)return this.settings.started=!1,window.postMessage({belobot:!0,act:"robotSettings",settings:t.settings},window.location.href),!1;if("updateStream"==this.action){if("candles"==this.settings.strategy){let t=this.strategies.candles(this.rates[e].rates,Math.trunc(s),4);t&&("down"==t?this.deal(e,"up"):this.deal(e,"down"))}if("cci"==this.settings.strategy){let t=this.strategies.cci(this.rates[e].rates,Math.trunc(s),20);t&&(t<115&&this.rates[e].last_cci>115&&this.deal(e,"down"),t>-105&&this.rates[e].last_cci<-105&&this.deal(e,"up"),this.rates[e].last_cci=t)}if("pinBar"==this.settings.strategy){let t=this.strategies.pinBar(this.rates[e].rates,Math.trunc(s),4);t&&this.deal(e,t)}if("rsiBinary"==this.settings.strategy){const r=this.strategies.rsiBinary(this.rates[e].rates,Math.trunc(s),6);if(r!==!1){const c=this.rates[e].rsi_prev;if(c!==!1){if(c>=13&&r<13){this.deal(e,"up");const p=new Date;p.setSeconds(p.getSeconds()+180);this.rates[e].nextDealTime=p}if(c<=82&&r>82){this.deal(e,"down");const p=new Date;p.setSeconds(p.getSeconds()+180);this.rates[e].nextDealTime=p}}this.rates[e].rsi_prev=r}}if("binaryContinuation"==this.settings.strategy){if(!this.userInfo.martinState[e])this.userInfo.martinState[e]={};var _ms=this.userInfo.martinState[e];if(!_ms.bcStopped){if(_ms.bcCooldown&&Date.now()<_ms.bcCooldown){}else{if(_ms.bcCooldown&&Date.now()>=_ms.bcCooldown)_ms.bcCooldown=null;var _sig=this.strategies.binaryContinuation(this.rates[e].rates,Math.trunc(s));if(_sig!==!1){var _amt=_ms.bcWait&&_ms.bcNextAmt?_ms.bcNextAmt:void 0;_ms.bcWait=!1;this.deal(e,_sig,_amt)}}}}}if("signals"==this.action&&"signals"==this.settings.strategy){let t=this.strategies.signals(this.rates[e].signals,this.settings.signals);t&&this.deal(e,t)}},check_reg(t){var e=this,s=new XMLHttpRequest;s.open("POST","https://2bot.top/check_user/",!0),s.setRequestHeader("Content-type","application/json; charset=utf-8"),s.onreadystatechange=function(){if(s.readyState==XMLHttpRequest.DONE)if(200==s.status){var t=JSON.parse(s.response);t.confirm?e.userInfo.onlyDemo=!1:e.userInfo.onlyDemo=!0,window.postMessage({belobot:!0,info_text:t.message})}else window.postMessage({belobot:!0,info_text:'Server <a href="https://2bot.top">https://2bot.top</a> is not available. Please report a problem trader.vitaly@gmail.com'})},s.send(JSON.stringify({user_id:t}))},deal(t,e,s){if((this.settings.useMartin||"martin"===this.settings.strategy)&&!s&&this.userInfo.martinState[t]&&this.userInfo.martinState[t].nextAmount)s=this.userInfo.martinState[t].nextAmount;e="up"==e?"call":"put",this.userInfo.futureDeals.push({pair:t,dur:e,sum:s});let a=new Date;a.setSeconds(a.getSeconds()+this.settings.delay),this.rates[t].nextDealTime=a,window.postMessage({belobot:!0,act:"newDeal"},window.location.href)},addRate(t){this.rates[t.name].rates[t.elm[0]]=[t.elm[1],t.elm[2],t.elm[3],t.elm[4]]},addCurrentRate(t){var e=60*parseInt(t.elm[0]/60);this.checkRate(t.name),null==this.rates[t.name].rates[e]&&(this.rates[t.name].rates[e]=[t.elm[1],t.elm[1],t.elm[1],t.elm[1]]),t.elm[1]>this.rates[t.name].rates[e][2]?this.rates[t.name].rates[e][2]=t.elm[1]:t.elm[1]<this.rates[t.name].rates[e][3]&&(this.rates[t.name].rates[e][3]=t.elm[1]),this.rates[t.name].rates[e][1]=t.elm[1]},checkRate(t){null==this.rates[t]&&(this.rates[t]={rates:{}}),null==this.rates[t].signals&&(this.rates[t].signals={}),null==this.rates[t].nextDealTime&&(this.rates[t].nextDealTime=new Date),null==this.rates[t].last_cci&&(this.rates[t].last_cci=!1),null==this.rates[t].rsi_prev&&(this.rates[t].rsi_prev=!1)},update(e){return"updateHistory"==this.action&&(this.checkRate(e.asset),e.candles.forEach((function(t){this.addRate({name:e.asset,elm:t})}),this),e.history.forEach((function(t){this.addCurrentRate({name:e.asset,elm:t})}),this)),"updateStream"==this.action&&(window.__MPB_LAST_STREAM_AT__=Date.now())&&e.forEach((function(t){this.checkRate(t[0]),this.addCurrentRate({name:t[0],elm:[t[1],t[2]]}),this.checkDial(t[0],t[1])}),this),"updateAssets"==this.action&&e.forEach((function(t){this.checkRate(t[1]),this.rates[t[1]].profit=t[5],this.rates[t[1]].active=t[14],this.rates[t[1]].fullname=t[2]}),this),"updateBalance"==this.action&&(this.userInfo.uid||(this.userInfo.uid=AppData.uid,this.check_reg(this.userInfo.uid)),e.isDemo?this.userInfo.balance.real=e.balance:this.userInfo.balance.real=e.balance,this.userInfo.isDemo=e.isDemo),"updateOpenedDeals"===this.action&&(this.userInfo.openedDials=e.length),"successopenOrder"===this.action&&this.settings.started&&this.userInfo.robotDeals.opened.push(e.id),"successcloseOrder"===this.action&&(e.deals.forEach((function(t){var e=this.userInfo.robotDeals.opened.indexOf(t.id);if(e>-1&&(this.userInfo.robotDeals.opened.splice(e,1),this.userInfo.robotDeals.closed.push(t.profit),("martin"===this.settings.strategy||this.settings.useMartin)&&this.settings.started)){if(t.profit<0){let _ms=this.userInfo.martinState[t.asset]||{step:0};_ms.step<5?this.userInfo.martinState[t.asset]={step:_ms.step+1,nextAmount:Math.floor(t.amount*2*100)/100}:this.userInfo.martinState[t.asset]={step:0,nextAmount:null}}else if(t.profit>0)this.userInfo.martinState[t.asset]={step:0,nextAmount:null}}if(e>-1&&"binaryContinuation"===this.settings.strategy&&this.settings.started){if(!this.userInfo.martinState[t.asset])this.userInfo.martinState[t.asset]={};var _bcms=this.userInfo.martinState[t.asset];if(t.profit<0){var _step=(_bcms.bcStep||0)+1;_bcms.bcStep=_step;_bcms.bcNextAmt=Math.floor(t.amount*2*100)/100;_bcms.bcWait=!0;if(_step>=4)_bcms.bcStopped=!0;else if(_step>=3)_bcms.bcCooldown=Date.now()+(this.settings.bcCooldownMinutes||10)*60000}else if(t.profit>0){_bcms.bcStep=0;_bcms.bcNextAmt=null;_bcms.bcWait=!1;_bcms.bcStopped=!1;_bcms.bcCooldown=null}}this.userInfo.openedDials--}),this),window.postMessage({belobot:!0,robotDeals:t.userInfo.robotDeals},window.location.href)),"signals"===this.action&&e.signals.forEach((function(t){this.checkRate(t[0]),t[1].forEach((function(e){this.rates[t[0]].signals[e[0]]=e[1]}),this),this.checkDial(t[0])}),this),this.action=!1,!1},getState(){window.postMessage({belobot:!0,data:{settings:this.settings}},window.location.href)},setState(t){for(var e in t)this.settings=t[e]},strategies:{cci:function(t,e,s){if(t.length<s)return!1;let a=[],i=60*parseInt(e/60);for(let e=i-60*(s-1);e<=i;e+=60)a.push(t[e]);const n=a.map((t=>(t[0]+t[2]+t[3]+t[1])/4)),r=n.reduce(((t,e)=>t+e),0)/s,o=n.reduce(((t,e)=>t+Math.abs(e-r)),0)/s;return(n[s-1]-r)/(.02*o)},candles:function(t,e,s){var a=!1;for(let i=0,n=60*parseInt(e/60);i<=s;i++,n-=60){if(null==t[n])return!1;if(t[n][0]==t[n][1])return!1;if(t[n][0]<t[n][1])if(a){if("down"==a)return!1}else a="up";if(t[n][0]>t[n][1])if(a){if("up"==a)return!1}else a="down"}return a},pinBar:function(t,e,s){let a=60*parseInt(e/60),i=new Date(1e3*e).getSeconds(),n=t[a];if(i<40)return!1;const r=Math.abs(n[1]-n[0]),o=n[2]-Math.max(n[0],n[1]),l=Math.min(n[0],n[1])-n[3];return o>l&&o>r*s?"down":o<l&&l>r*s&&"up"},signals:function(t,e){let s=[t[1],t[2],t[3],t[5],t[10],t[15]],a=!1;for(var i=0;i<s.length;i++)if(0!=e[i]){if(s[i]>0)if(s[i]>2){if("up"==a)return!1;a||(a="down"),s[i]-=2}else{if("down"==a)return!1;a||(a="up")}if(s[i]<e[i])return!1}return a},rsiBinary:function(t,e,s){const a=[];const i=60*Math.floor(e/60);for(let r=s;r>=0;r--){const n=t[i-60*r];if(!n)return!1;a.push(n[1])}let o=0,l=0;for(let r=1;r<=s;r++){const n=a[r]-a[r-1];n>0?o+=n:l-=n}o/=s;l/=s;if(l===0)return o===0?50:100;const c=o/l;return 100-(100/(1+c))},binaryContinuation:function(rates,currentTs){function _ema(arr,p){if(arr.length<p)return null;var k=2/(p+1),v=arr[0];for(var i=1;i<arr.length;i++)v=arr[i]*k+v*(1-k);return v}function _rsi(arr,p){if(arr.length<p+1)return null;var g=0,l=0,n=arr.length;for(var i=n-p;i<n;i++){var d=arr[i]-arr[i-1];if(d>0)g+=d;else l-=d}g/=p;l/=p;if(l===0)return 100;return 100-100/(1+g/l)}function _m5(n){var res=[],t=Math.floor(currentTs/300)*300;while(res.length<n&&t>0){var o=null,c=null,h=-Infinity,lo=Infinity;for(var m=t;m<t+300;m+=60){if(rates[m]){if(o===null)o=rates[m][0];c=rates[m][1];if(rates[m][2]>h)h=rates[m][2];if(rates[m][3]<lo)lo=rates[m][3]}}if(o!==null)res.unshift([o,c,h,lo]);t-=300}return res}function _m1(n){var res=[],t=Math.floor(currentTs/60)*60;while(res.length<n&&t>0){if(rates[t])res.unshift(rates[t]);t-=60}return res}var m5=_m5(250);if(m5.length<220)return!1;var m5c=m5.map(function(c){return c[1]});var ema200=_ema(m5c,200);if(!ema200)return!1;var ema200p=_ema(m5c.slice(0,m5c.length-5),200);if(!ema200p)return!1;var slope=ema200>ema200p?'up':ema200<ema200p?'down':'flat';var price=m5c[m5c.length-1];var r14=_rsi(m5c,14);if(r14===null)return!1;var dir=null;if(price>ema200&&slope==='up'&&r14>55)dir='up';else if(price<ema200&&slope==='down'&&r14<45)dir='down';if(!dir)return!1;var m1=_m1(35);if(m1.length<25)return!1;var m1c=m1.map(function(c){return c[1]});var ema20=_ema(m1c,20);if(!ema20)return!1;var cur=m1[m1.length-1],prev=m1[m1.length-2];if(!cur||!prev)return!1;var dm=m1.slice(m1.length-15);if(dm.length<15)return!1;var pd=0,md=0,tr=0;for(var i=1;i<dm.length;i++){var h=dm[i][2],l=dm[i][3],ph=dm[i-1][2],pl=dm[i-1][3],pc=dm[i-1][1];var up=h-ph,dn=pl-l;pd+=(up>dn&&up>0)?up:0;md+=(dn>up&&dn>0)?dn:0;tr+=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc))}if(!tr)return!1;var pdi=100*pd/tr,mdi=100*md/tr;if(dir==='up'&&cur[1]>cur[0]&&cur[1]>ema20&&pdi>mdi&&cur[1]>prev[2])return'up';if(dir==='down'&&cur[1]<cur[0]&&cur[1]<ema20&&mdi>pdi&&cur[1]<prev[3])return'down';return!1}}},e=t;window.addEventListener("message",(function(t){if(t.data.belobot){if("readState"==t.data.act&&window.postMessage({belobot:!0,act:"robotSettings",settings:e.settings},window.location.href),"setState"==t.data.act)for(let s in t.data.settings)"take_profit"==s?e.settings.take_profit.percent=t.data.settings[s]:e.settings[s]=t.data.settings[s];if("start_stop"==t.data.act){if(false&&e.userInfo.onlyDemo)return!1;e.userInfo.isDemo?e.settings.take_profit.sum=Math.floor(e.userInfo.balance.real*(e.settings.take_profit.percent+100)/100):e.settings.take_profit.sum=Math.floor(e.userInfo.balance.real*(e.settings.take_profit.percent+100)/100),e.settings.started=!e.settings.started,e.userInfo.futureDeals=[],e.userInfo.martinState={},e.settings.started||window.postMessage({belobot:!0,robotDeals:e.userInfo.robotDeals},window.location.href)}if("mpb_health"==t.data.act){window.postMessage({belobot:!0,act:"mpb_health",isDemo:e.userInfo.isDemo,started:e.settings.started,lastStreamAt:window.__MPB_LAST_STREAM_AT__||null},window.location.href)}if("placeDemoTrade"==t.data.act){if(!e.userInfo.isDemo){window.postMessage({belobot:!0,act:"placeDemoTrade",ok:!1,reason:"not-demo"},window.location.href)}else{var _p=t.data.pair||(e.settings.selected_pairs&&e.settings.selected_pairs[0]);if(!_p){window.postMessage({belobot:!0,act:"placeDemoTrade",ok:!1,reason:"no-pair"},window.location.href)}else{var _w=e.settings.started;e.settings.started=!0;e.deal(_p,"up",t.data.amount||1);window.postMessage({belobot:!0,act:"placeDemoTrade",ok:!0,pair:_p},window.location.href);setTimeout(function(){e.settings.started=_w},3e3)}}}}}));var s=window.WebSocket;window.WebSocket=function(t,a){var i=a?new s(t,a):new s(t);return i.addEventListener("open",(function(t){})),i.addEventListener("message",(function(t){if(t.data instanceof ArrayBuffer&&e.action){let a=JSON.parse((s=t.data,String.fromCharCode.apply(null,new Uint8Array(s))));e.update(a)}else if(t.data.length>6)try{let s=JSON.parse(t.data.slice(4));"updateHistoryNew"===s[0]?e.action="updateHistory":"updateStream"===s[0]?e.action="updateStream":"updateAssets"===s[0]?e.action="updateAssets":"successupdateBalance"===s[0]?e.action="updateBalance":"updateOpenedDeals"===s[0]?e.action="updateOpenedDeals":"successopenOrder"===s[0]?e.action="successopenOrder":"successcloseOrder"===s[0]?e.action="successcloseOrder":"upsignals"!==s[0]&&"updateSignalForecast"!==s[0]&&"signals/load"!==s[0]&&"signals/update"!==s[0]||(e.action="signals")}catch{}var s})),i.addEventListener("send",(function(t){})),i.oldSend=s.prototype.send,i.send=function(t){if(e.settings.started&&(e.userInfo.futureDeals.length>0||!e.userInfo.startSum)&&"["==t[2])try{var s=JSON.parse(t.slice(2)),a=e.userInfo.futureDeals.pop(),n=t.slice(0,2);e.userInfo.startSum=s[1].amount,s[1].asset=a.pair,s[1].action=a.dur,a.sum&&(s[1].amount=a.sum),e.userInfo.onlyDemo&&(s[1].isDemo=1),n+=JSON.stringify(s),e.userInfo.openedDials++,i.oldSend.apply(this,[n])}catch{i.oldSend.apply(this,[t])}else i.oldSend.apply(this,[t])},i}})();
 
 
 // === Money Printer Bot — UI Inject (Dark Neon) ===
@@ -323,7 +323,6 @@
   background: rgba(255,71,105,.16); color:#ffd5dc; border:1px solid rgba(255,71,105,.35);
   font-size: 11px; font-weight:800;
 }
-.mpb-header{display:none!important;}
 
 /* Pair-selection tile */
 #mpb-pairs .mpb-pairs-grid {
@@ -988,6 +987,159 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       }
     }, true);
   })();
+})();
+
+
+// === MPB System Check Tile ===
+(function(){
+  var _isDemo = null;
+
+  function qs(s,r){ return (r||document).querySelector(s); }
+  function read(k,d){ try{ var v=JSON.parse(localStorage.getItem(k)); return(v===null||v===undefined)?d:v; }catch(e){return d;} }
+
+  // Track demo state from mpb_health responses
+  window.addEventListener('message', function(ev){
+    var d = ev.data||{};
+    if(!d.belobot) return;
+    if(d.act === 'mpb_health') { _isDemo = d.isDemo; }
+  }, true);
+
+  function mountSysCheck(){
+    var root = document.getElementById('sub-menu-robot-modal');
+    if(!root) return;
+    var slot = qs('#mpb-slot', root);
+    if(!slot) return;
+    if(qs('#mpb-syscheck', slot)) return;
+
+    var tile = document.createElement('div');
+    tile.id = 'mpb-syscheck';
+    tile.className = 'mpb-tile';
+    tile.style.cssText = 'border-color:rgba(0,229,255,.4);margin-top:8px;';
+    tile.innerHTML =
+      '<div class="mpb-tile__title">⚙ System Check</div>'
+      + '<div id="mpb-syscheck-out" style="font-size:11px;margin-top:8px;line-height:1.7;color:#9fb4d6;">Click Run to check engine health.</div>'
+      + '<div class="mpb-tile__row" style="margin-top:8px;flex-wrap:wrap;gap:6px;">'
+      + '<button id="mpb-syscheck-btn" style="font-size:11px;padding:6px 12px;border-radius:8px;border:1px solid rgba(0,229,255,.4);background:rgba(0,229,255,.1);color:#eaf2ff;cursor:pointer;">Run System Check</button>'
+      + '<button id="mpb-demo-trade-btn" style="font-size:11px;padding:6px 12px;border-radius:8px;border:1px solid rgba(20,255,114,.4);background:rgba(20,255,114,.1);color:#eaf2ff;cursor:pointer;display:none;">Place Demo Test Trade</button>'
+      + '</div>';
+    slot.appendChild(tile);
+
+    var runBtn = tile.querySelector('#mpb-syscheck-btn');
+    var tradeBtn = tile.querySelector('#mpb-demo-trade-btn');
+    var out = tile.querySelector('#mpb-syscheck-out');
+
+    runBtn.addEventListener('click', function(){
+      runSystemCheck(out, tradeBtn);
+    });
+
+    tradeBtn.addEventListener('click', function(){
+      var pairs = read('mpb_selected_pairs', []);
+      var pair = pairs && pairs.length ? pairs[0] : null;
+      if(!pair){ mpbToast('No pair selected for demo trade.', false); return; }
+      if(!window.confirm('Place a $1 demo test trade on ' + pair + '?\nThis will only work in demo account mode.')){ return; }
+      window.postMessage({belobot:true, act:'placeDemoTrade', pair:pair, amount:1}, window.location.href);
+      tradeBtn.disabled = true;
+      tradeBtn.textContent = 'Trade queued…';
+      var handler = function(ev){
+        var d = ev.data||{};
+        if(!d.belobot || d.act !== 'placeDemoTrade') return;
+        window.removeEventListener('message', handler, true);
+        tradeBtn.disabled = false;
+        tradeBtn.textContent = 'Place Demo Test Trade';
+        if(d.ok){
+          mpbToast('Demo test trade queued: ' + d.pair + ' $1', true);
+          out.innerHTML += '<div style="color:#14ff72">✔ Demo trade queued: ' + d.pair + ' $1 — click a Call/Put button on the chart to execute</div>';
+        } else {
+          var reason = d.reason === 'not-demo' ? 'not in demo mode' : (d.reason === 'no-pair' ? 'no pair selected' : (d.reason||'unknown'));
+          mpbToast('Demo trade failed: ' + reason, false);
+          out.innerHTML += '<div style="color:#ff4769">✘ Demo trade failed: ' + reason + '</div>';
+        }
+      };
+      window.addEventListener('message', handler, true);
+    });
+  }
+
+  function runSystemCheck(out, tradeBtn){
+    out.innerHTML = '<span style="color:#9fb4d6">Running checks…</span>';
+    var lines = [];
+
+    // Check 1: Modal present
+    var modal = document.getElementById('sub-menu-robot-modal');
+    lines.push(modal
+      ? '<div style="color:#14ff72">✔ Modal present</div>'
+      : '<div style="color:#ff4769">✘ Modal not found</div>');
+
+    // Check 2: Engine injected
+    var engineOk = !!window.__MPB_ENGINE_INJECTED__;
+    lines.push(engineOk
+      ? '<div style="color:#14ff72">✔ Engine injected</div>'
+      : '<div style="color:#ff4769">✘ Engine not injected — reload the page</div>');
+
+    // Check 3: Selected pairs
+    var pairs = read('mpb_selected_pairs', []);
+    if(pairs && pairs.length){
+      lines.push('<div style="color:#14ff72">✔ Pairs selected: ' + pairs.length + ' (' + pairs.slice(0,3).join(', ') + (pairs.length>3?'…':'') + ')</div>');
+    } else {
+      lines.push('<div style="color:#ff4769">✘ No pairs selected — bot will not trade. Use the Trading Pairs tile to select pairs.</div>');
+    }
+
+    // Check 4: Stream health
+    var lastStream = window.__MPB_LAST_STREAM_AT__;
+    if(lastStream && (Date.now() - lastStream) < 30000){
+      lines.push('<div style="color:#14ff72">✔ Data stream active (' + Math.round((Date.now()-lastStream)/1000) + 's ago)</div>');
+    } else if(lastStream){
+      lines.push('<div style="color:#ffd24d">⚠ Stream stale (' + Math.round((Date.now()-lastStream)/1000) + 's ago) — chart may be frozen</div>');
+    } else {
+      lines.push('<div style="color:#ffd24d">⚠ No stream data yet — wait for chart to load or navigate to a trading pair</div>');
+    }
+
+    out.innerHTML = lines.join('');
+
+    // Check 5 & demo status: request engine health via postMessage
+    var healthTimeout = setTimeout(function(){
+      out.innerHTML += '<div style="color:#ff4769">✘ Engine health check timed out — engine may not be responding</div>';
+      if(tradeBtn) tradeBtn.style.display = 'none';
+    }, 5000);
+
+    var healthHandler = function(ev){
+      var d = ev.data||{};
+      if(!d.belobot || d.act !== 'mpb_health') return;
+      clearTimeout(healthTimeout);
+      window.removeEventListener('message', healthHandler, true);
+      _isDemo = d.isDemo;
+
+      // Check 5: Trade pipeline readiness
+      var pairsOk = pairs && pairs.length > 0;
+      out.innerHTML += (pairsOk
+        ? '<div style="color:#14ff72">✔ Trade pipeline ready</div>'
+        : '<div style="color:#ff4769">✘ Trade pipeline blocked — no pairs selected</div>');
+
+      // Demo/real account status + demo test trade button
+      if(d.isDemo === true){
+        out.innerHTML += '<div style="color:#14ff72">✔ Account: DEMO — demo test trade available</div>';
+        if(tradeBtn) tradeBtn.style.display = '';
+      } else if(d.isDemo === false){
+        out.innerHTML += '<div style="color:#ffd24d">⚠ Account: REAL — demo test trade disabled for safety</div>';
+        if(tradeBtn) tradeBtn.style.display = 'none';
+      } else {
+        out.innerHTML += '<div style="color:#9fb4d6">ℹ Account mode unknown (no balance data yet)</div>';
+        if(tradeBtn) tradeBtn.style.display = 'none';
+      }
+    };
+    window.addEventListener('message', healthHandler, true);
+    window.postMessage({belobot:true, act:'mpb_health'}, window.location.href);
+  }
+
+  // Mount System Check tile when robot icon is clicked (mpb-opened-from-icon event)
+  window.addEventListener('message', function(ev){
+    var d = ev.data||{};
+    if(!d.belobot || d.act !== 'mpb-opened-from-icon') return;
+    setTimeout(mountSysCheck, 300);
+  }, true);
+
+  // Also attempt mounting after initial load in case modal is already open
+  // (2500ms delay allows the platform and slot container to finish rendering)
+  setTimeout(mountSysCheck, 2500);
 })();
 
 }catch(e){console.debug('WAR error', e);}})();

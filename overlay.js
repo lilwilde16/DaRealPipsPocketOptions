@@ -424,8 +424,6 @@ function initMoneyPrinterUI() {
 }
 
 /* Hide legacy big SL panel so only the new one is visible */
-.mpb-header,
-.mpb-tile,
 #mpb-sl-panel,
 #mpb-sl-root {
   display: none !important;
@@ -827,6 +825,25 @@ function initMoneyPrinterUI() {
     setInterval(syncFromInterface, 500);
 
   } catch (err) {}
+})();
+
+
+// === Bind #robot_icon click to open native modal and dispatch mpb-opened-from-icon ===
+(function bindRobotIconHandler() {
+  function bind() {
+    var icon = document.getElementById('robot_icon');
+    if (!icon || icon.__mpb_icon_bound) return;
+    icon.__mpb_icon_bound = true;
+    var anchor = icon.parentElement;
+    if (anchor) {
+      anchor.addEventListener('click', function () {
+        window.postMessage({ belobot: true, act: 'mpb-opened-from-icon' }, window.location.href);
+      });
+    }
+  }
+  bind();
+  var obs = new MutationObserver(bind);
+  obs.observe(document.documentElement, { childList: true, subtree: true });
 })();
 
 
