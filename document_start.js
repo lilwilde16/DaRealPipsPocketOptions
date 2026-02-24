@@ -18,6 +18,8 @@
   if (/\/(login|register|registration|sign-up|sign-in)(\/|$)/i.test(window.location.pathname)) return;
 
   window.__MPB_ENGINE_INJECTED__ = true;
+  // Also set a DOM attribute so page-context code can detect injection across isolated worlds
+  document.documentElement.dataset.mpbEngineInjected = '1';
 
   // Create and inject the main bot script
   const s = document.createElement("script");
