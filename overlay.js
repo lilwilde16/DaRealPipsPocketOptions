@@ -423,9 +423,7 @@ function initMoneyPrinterUI() {
   box-shadow: 0 8px 24px rgba(22,163,74,0.55);
 }
 
-/* Hide legacy big SL panel so only the new one is visible */
-.mpb-header,
-.mpb-tile,
+/* Hide legacy standalone SL/TP panels (modal tiles remain visible) */
 #mpb-sl-panel,
 #mpb-sl-root {
   display: none !important;
@@ -699,6 +697,43 @@ function initMoneyPrinterUI() {
         }
       } catch (e) {}
     }
+
+    // ===== #robot_icon click — open native robot modal =====
+    function bindRobotIcon() {
+      var icon = document.getElementById('robot_icon');
+      if (!icon || icon.__mpb_bound) return;
+      icon.__mpb_bound = true;
+      icon.addEventListener('click', function () {
+        // Make the native robot modal visible if it is hidden
+        var modal = document.getElementById('sub-menu-robot-modal');
+        if (modal) {
+          modal.style.removeProperty('display');
+          modal.classList.add('active');
+        }
+        // Also click the native robot start/menu button if it can open the panel
+        var ssBtn = document.getElementById('ss_button');
+        if (ssBtn && modal && modal.offsetParent === null) {
+          ssBtn.click();
+        }
+        // Signal web_accessible_resources.js that the icon was clicked
+        document.dispatchEvent(new CustomEvent('mpb-icon-clicked'));
+      });
+    }
+
+    // Retry binding in case the icon is injected late
+    (function tryBindIcon() {
+      if (document.getElementById('robot_icon')) {
+        bindRobotIcon();
+      } else {
+        var _iconObs = new MutationObserver(function () {
+          if (document.getElementById('robot_icon')) {
+            _iconObs.disconnect();
+            bindRobotIcon();
+          }
+        });
+        _iconObs.observe(document.documentElement, { childList: true, subtree: true });
+      }
+    })();
 
     function boot() {
       mountPnlTop();

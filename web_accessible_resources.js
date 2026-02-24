@@ -323,7 +323,6 @@
   background: rgba(255,71,105,.16); color:#ffd5dc; border:1px solid rgba(255,71,105,.35);
   font-size: 11px; font-weight:800;
 }
-.mpb-header{display:none!important;}
 
 /* Pair-selection tile */
 #mpb-pairs .mpb-pairs-grid {
@@ -988,6 +987,203 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       }
     }, true);
   })();
+})();
+
+
+// === MPB: System Check tile (mounts on mpb-icon-clicked event) ===
+(function(){
+  // Track data-stream heartbeat: flag is set whenever a websocket updateStream message arrives
+  var _mpbStreamSeen = false;
+  window.addEventListener('message', function(e){
+    var d = e.data||{};
+    if(d.belobot && (d.act === 'updateStream' || (typeof d.action === 'string' && d.action.indexOf('update') === 0))){
+      _mpbStreamSeen = true;
+    }
+    // The engine also posts robotSettings on readState — use any belobot message as a stream signal
+    if(d.belobot) _mpbStreamSeen = true;
+  }, true);
+
+  function qs(s, r){ return (r||document).querySelector(s); }
+  function read(k, d){ try{ var v = JSON.parse(localStorage.getItem(k)); return (v===null||v===undefined)?d:v; }catch(e){return d;} }
+
+  function isDemo(){
+    // Check the userInfo via a postMessage round-trip is async; use DOM heuristics instead.
+    // PocketOption shows a "Demo" badge or balance label when in demo mode.
+    var txt = (document.body||document.documentElement).innerText||'';
+    // Look for explicit demo indicators
+    if(/\bdemo\b/i.test(txt)){
+      // Use lower-case class/id checks (querySelector case-insensitive attribute flag has limited support)
+      var demoEl = document.querySelector('[class*="demo"],[id*="demo"],[data-demo],[data-account*="demo"]')
+        || document.querySelector('[class*="Demo"],[id*="Demo"]');
+      if(demoEl) return true;
+    }
+    return false;
+  }
+
+  function runChecks(){
+    var results = [];
+
+    // 1. Engine injected
+    var engineOk = !!(window.__MPB_ENGINE_INJECTED__);
+    results.push({label:'Engine injected', ok: engineOk, msg: engineOk ? 'OK' : 'NOT detected — reload page'});
+
+    // 2. Selected pairs
+    var pairs = read('mpb_selected_pairs', []);
+    var pairsOk = Array.isArray(pairs) && pairs.length > 0;
+    results.push({label:'Trading pairs selected', ok: pairsOk, msg: pairsOk ? (pairs.length + ' pair(s) active') : '⚠ NONE selected — bot will NOT trade'});
+
+    // 3. Data stream heartbeat
+    results.push({label:'Data stream', ok: _mpbStreamSeen, msg: _mpbStreamSeen ? 'Stream activity detected' : 'No stream data yet (bot may not have started)'});
+
+    // 4. Required DOM nodes
+    var hasModal = !!document.getElementById('sub-menu-robot-modal');
+    var hasBtn   = !!document.getElementById('ss_button');
+    results.push({label:'#sub-menu-robot-modal present', ok: hasModal, msg: hasModal ? 'Found' : 'Missing — UI cannot function'});
+    results.push({label:'#ss_button present', ok: hasBtn,   msg: hasBtn   ? 'Found' : 'Missing — start/stop unavailable'});
+
+    return results;
+  }
+
+  function renderResults(container, results){
+    container.innerHTML = results.map(function(r){
+      var color = r.ok ? '#14ff72' : '#ff4769';
+      var icon  = r.ok ? '✓' : '✗';
+      return '<div style="display:flex;align-items:center;gap:6px;margin:4px 0;font-size:11px;">'
+        + '<span style="color:'+color+';font-weight:900;min-width:14px;">'+icon+'</span>'
+        + '<span style="color:#9fb4d6;min-width:170px;">'+r.label+'</span>'
+        + '<span style="color:#eaf2ff;">'+r.msg+'</span>'
+        + '</div>';
+    }).join('');
+  }
+
+  function mountSystemCheck(){
+    var root = document.getElementById('sub-menu-robot-modal') || document.body;
+    if(!root) return;
+
+    // Ensure slot exists
+    var slot = qs('#mpb-slot', root);
+    if(!slot){
+      slot = document.createElement('div');
+      slot.id = 'mpb-slot';
+      slot.style.padding = '10px 16px 4px';
+      var hdr = qs('.mpb-header', root);
+      if(hdr && hdr.nextSibling){
+        hdr.parentElement.insertBefore(slot, hdr.nextSibling);
+      } else {
+        root.insertBefore(slot, root.firstChild);
+      }
+    }
+
+    if(qs('#mpb-sys-check', slot)) return; // already mounted
+
+    var tile = document.createElement('div');
+    tile.id = 'mpb-sys-check';
+    tile.className = 'mpb-tile';
+    tile.style.cssText = 'border-color:rgba(0,229,255,.45);margin-top:8px;';
+
+    tile.innerHTML = ''
+      + '<div class="mpb-tile__title" style="color:#a5f3ff;">🔍 System Check</div>'
+      + '<div id="mpb-sys-results" style="margin:8px 0;min-height:24px;"></div>'
+      + '<div class="mpb-tile__row" style="gap:8px;margin-top:6px;">'
+      + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Run System Check</button>'
+      + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;display:none;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
+      + '</div>'
+      + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>';
+
+    slot.insertBefore(tile, slot.firstChild);
+
+    var resultsEl  = tile.querySelector('#mpb-sys-results');
+    var runBtn     = tile.querySelector('#mpb-run-check');
+    var demoBtn    = tile.querySelector('#mpb-demo-trade');
+    var noteEl     = tile.querySelector('#mpb-sys-note');
+
+    runBtn.addEventListener('click', function(){
+      var results = runChecks();
+      renderResults(resultsEl, results);
+      noteEl.textContent = '';
+
+      // Show demo trade button only in demo mode
+      var demo = isDemo();
+      demoBtn.style.display = demo ? '' : 'none';
+      if(!demo){
+        noteEl.textContent = 'Demo test trade is only available in demo account mode.';
+      }
+    });
+
+    // Demo test trade — requires double-click confirmation
+    var _demoConfirmPending = false;
+    var _demoConfirmTimer = null;
+
+    function _cancelDemoConfirm(){
+      if(_demoConfirmTimer){ clearTimeout(_demoConfirmTimer); _demoConfirmTimer = null; }
+      _demoConfirmPending = false;
+      demoBtn.textContent = '⚡ Place Demo Test Trade ($1)';
+      demoBtn.style.borderColor = 'rgba(255,213,77,.5)';
+    }
+    // Clear pending confirmation on page hide to avoid stale callbacks
+    window.addEventListener('pagehide', _cancelDemoConfirm, {once: true});
+
+    demoBtn.addEventListener('click', function(){
+      // Gate: only in demo
+      if(!isDemo()){
+        noteEl.textContent = '⛔ Not in demo mode — test trade blocked.';
+        return;
+      }
+
+      if(!_demoConfirmPending){
+        // First click — ask for confirmation
+        _demoConfirmPending = true;
+        demoBtn.textContent = '⚠ Click again to confirm demo trade';
+        demoBtn.style.borderColor = 'rgba(255,71,105,.7)';
+        noteEl.textContent = 'Click the button again within 5 seconds to confirm placing a $1 demo test trade.';
+        _demoConfirmTimer = setTimeout(function(){
+          _cancelDemoConfirm();
+          noteEl.textContent = 'Confirmation timed out. No trade placed.';
+        }, 5000);
+      } else {
+        // Second click — confirmed, place trade
+        clearTimeout(_demoConfirmTimer);
+        _demoConfirmTimer = null;
+        _demoConfirmPending = false;
+        demoBtn.textContent = '⚡ Place Demo Test Trade ($1)';
+        demoBtn.style.borderColor = 'rgba(255,213,77,.5)';
+
+        // Final demo guard before placing
+        if(!isDemo()){
+          noteEl.textContent = '⛔ Not in demo mode — test trade blocked.';
+          return;
+        }
+
+        // Place a small demo trade via the existing bot mechanism
+        // Force isDemo flag and use postMessage to trigger a single deal
+        window.postMessage({
+          belobot: true,
+          act: 'setState',
+          settings: {
+            selected_pairs: read('mpb_selected_pairs', []).length ? read('mpb_selected_pairs', []) : ['EURUSD_otc'],
+            deals_limit: 1,
+            delay: 0
+          }
+        }, window.location.href);
+
+        // Dispatch a demo test-trade event with explicit isDemo guard for the engine
+        window.postMessage({
+          belobot: true,
+          act: 'mpb_demo_test_trade',
+          amount: 1,
+          isDemo: true
+        }, window.location.href);
+
+        noteEl.textContent = '✓ Demo test trade signal sent ($1). Check open trades to confirm.';
+        mpbToast('Demo test trade placed ($1) — check open trades.', true);
+      }
+    });
+  }
+
+  // Mount only after the robot icon is clicked
+  document.addEventListener('mpb-icon-clicked', function onIconClicked(){
+    mountSystemCheck();
+  });
 })();
 
 }catch(e){console.debug('WAR error', e);}})();
