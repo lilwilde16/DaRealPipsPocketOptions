@@ -522,7 +522,7 @@
       + '<div class="mpb-tile__title">Stop Loss</div>'
       + '<div class="mpb-tile__row">'
       + '  <div class="mpb-pill" data-mode="usd">$ Amount</div>'
-      + '  <div class="mpb-pill" data-mode="pct">% Percent</div>'
+      + '  <div class="mpb-pill" data-mode="pct">%</div>'
       + '  <input class="mpb-input" type="number" step="0.01" id="mpb-sl-value" placeholder="e.g. 50" />'
       + '  <input class="mpb-input" type="number" step="0.01" id="mpb-sl-bankroll" placeholder="Account size (for %)" />'
       + '  <span class="mpb-sl-badge" id="mpb-sl-status">guard off</span>'
@@ -740,7 +740,7 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '<div class="mpb-tile__title">Stop Loss</div>'
       + '<div class="mpb-tile__row">'
       + '  <div class="mpb-pill" data-mode="usd">$ Amount</div>'
-      + '  <div class="mpb-pill" data-mode="pct">% Percent</div>'
+      + '  <div class="mpb-pill" data-mode="pct">%</div>'
       + '  <input class="mpb-input" type="number" step="0.01" id="mpb-sl-value" placeholder="e.g. 50" />'
       + '  <input class="mpb-input" type="number" step="0.01" id="mpb-sl-bankroll" placeholder="Account size (for %)" />'
       + '  <span class="mpb-sl-badge" id="mpb-sl-status">guard off</span>'
@@ -915,7 +915,7 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '<div class="mpb-tile__title">Stop Loss</div>'
       + '<div class="mpb-tile__row">'
       + '  <div class="mpb-pill" data-mode="usd">$ Amount</div>'
-      + '  <div class="mpb-pill" data-mode="pct">% Percent</div>'
+      + '  <div class="mpb-pill" data-mode="pct">%</div>'
       + '  <input class="mpb-input" type="number" step="0.01" id="mpb-sl-value" placeholder="e.g. 50" />'
       + '  <input class="mpb-input" type="number" step="0.01" id="mpb-sl-bankroll" placeholder="Account size (for %)" />'
       + '  <span class="mpb-sl-badge" id="mpb-sl-status">guard off</span>'
@@ -1085,8 +1085,8 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '<div class="mpb-tile__title" style="color:#a5f3ff;">🔍 System Check</div>'
       + '<div id="mpb-sys-results" style="margin:8px 0;min-height:24px;"></div>'
       + '<div class="mpb-tile__row" style="gap:8px;margin-top:6px;">'
-      + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Run System Check</button>'
-      + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;display:none;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
+      + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Test</button>'
+      + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
       + '</div>'
       + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>';
 
@@ -1101,13 +1101,6 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       var results = runChecks();
       renderResults(resultsEl, results);
       noteEl.textContent = '';
-
-      // Show demo trade button only in demo mode
-      var demo = isDemo();
-      demoBtn.style.display = demo ? '' : 'none';
-      if(!demo){
-        noteEl.textContent = 'Demo test trade is only available in demo account mode.';
-      }
     });
 
     // Demo test trade — requires double-click confirmation
@@ -1180,7 +1173,28 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
     });
   }
 
-  // Mount only after the robot icon is clicked
+  // Auto-mount: call immediately if modal is already present, and observe for it appearing.
+  // Disconnect the observer once the tile is successfully mounted; the setInterval handles recovery.
+  mountSystemCheck();
+
+  var sysCheckObserver = new MutationObserver(function(){
+    if(document.getElementById('sub-menu-robot-modal')){
+      sysCheckObserver.disconnect();
+      mountSystemCheck();
+    }
+  });
+  if(!document.getElementById('mpb-sys-check')){
+    sysCheckObserver.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  // Periodic remount to survive re-renders (e.g. live/demo switch)
+  setInterval(function(){
+    if(document.getElementById('sub-menu-robot-modal') && !document.getElementById('mpb-sys-check')){
+      mountSystemCheck();
+    }
+  }, 1500);
+
+  // Also mount on icon click (legacy path)
   document.addEventListener('mpb-icon-clicked', function onIconClicked(){
     mountSystemCheck();
   });
