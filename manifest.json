@@ -2,7 +2,7 @@
   "update_url": "https://clients2.google.com/service/update2/crx",
   "manifest_version": 3,
   "name": "Money Printer Bot",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "author": "Jash",
   "description": "Money Printer Bot",
   "short_name": "Money Printer Bot",
@@ -135,5 +135,8 @@
       "38": "./icon/icon_38.png"
     },
     "default_title": "Money Printer Bot"
+  },
+  "background": {
+    "service_worker": "main.js"
   }
 }

@@ -6,10 +6,16 @@
   window.__mpbWsProtoHooked = true;
   try {
     var _origProtoSend = WebSocket.prototype.send;
+    window.__mpbWsPool = window.__mpbWsPool || [];
     WebSocket.prototype.send = function mpbWsSend(data) {
+      if (window.__mpbWsPool.indexOf(this) === -1) window.__mpbWsPool.push(this);
       if (!window.__mpbWs && this.readyState !== WebSocket.CLOSED) {
         console.log('[MPB] WebSocket captured via prototype hook');
         window.__mpbWs = this;
+      }
+      if (typeof data === 'string' && data.indexOf('openOrder') !== -1) {
+        window.__mpbTradeWs = this;
+        window.__mpbLastOpenOrderPayload = data;
       }
       return _origProtoSend.apply(this, arguments);
     };
@@ -83,6 +89,59 @@ function _mpbLogNextMessage(ws, label) {
   ws.addEventListener('message', handler);
 }
 
+
+/**
+ * Pick the best WebSocket candidate for order execution.
+ */
+function _mpbResolveTradeWs() {
+  if (window.__mpbTradeWs && typeof window.__mpbTradeWs.send === 'function') { _mpbSetTradeRouteMeta({source:'__mpbTradeWs', payload:(window.__mpbLastOpenOrderPayload?'captured':'fallback'), readyState: window.__mpbTradeWs.readyState}); return window.__mpbTradeWs; }
+  if (window.__mpbWs && typeof window.__mpbWs.send === 'function' && window.__mpbWs.oldSend) { _mpbSetTradeRouteMeta({source:'__mpbWs', payload:(window.__mpbLastOpenOrderPayload?'captured':'fallback'), readyState: window.__mpbWs.readyState}); return window.__mpbWs; }
+  var pool = window.__mpbWsPool || [];
+  for (var i = pool.length - 1; i >= 0; i--) {
+    var ws = pool[i];
+    if (ws && typeof ws.send === 'function' && ws.oldSend) { _mpbSetTradeRouteMeta({source:'__mpbWsPool(wrapped)', payload:(window.__mpbLastOpenOrderPayload?'captured':'fallback'), readyState: ws.readyState}); return ws; }
+  }
+  if (window.__mpbWs && typeof window.__mpbWs.send === 'function') { _mpbSetTradeRouteMeta({source:'__mpbWs(fallback)', payload:(window.__mpbLastOpenOrderPayload?'captured':'fallback'), readyState: window.__mpbWs.readyState}); return window.__mpbWs; }
+  for (var j = pool.length - 1; j >= 0; j--) {
+    if (pool[j] && typeof pool[j].send === 'function') { _mpbSetTradeRouteMeta({source:'__mpbWsPool(fallback)', payload:(window.__mpbLastOpenOrderPayload?'captured':'fallback'), readyState: pool[j].readyState}); return pool[j]; }
+  }
+  return null;
+}
+
+/**
+ * Build an openOrder payload by reusing the last real payload when possible.
+ */
+function _mpbBuildOpenOrderPayload(pair) {
+  var payload = window.__mpbLastOpenOrderPayload;
+  if (typeof payload === 'string' && payload.length > 4 && payload[0] === '4' && payload[1] === '2') {
+    try {
+      var parsed = JSON.parse(payload.slice(2));
+      if (Array.isArray(parsed) && parsed[1] && typeof parsed[1] === 'object') {
+        parsed[1].asset = pair;
+        parsed[1].action = 'call';
+        parsed[1].amount = 1;
+        parsed[1].isDemo = 1;
+        if (!parsed[1].time) parsed[1].time = 60;
+        return '42' + JSON.stringify(parsed);
+      }
+    } catch(_) {}
+  }
+  return '42' + JSON.stringify(['openOrder', {asset: pair, action: 'call', amount: 1, isDemo: 1, time: 60}]);
+}
+
+function _mpbSetTradeRouteMeta(meta) {
+  window.__mpbLastTradeRoute = Object.assign({ ts: Date.now() }, meta || {});
+}
+
+function _mpbGetTradeRouteLabel() {
+  var r = window.__mpbLastTradeRoute;
+  if (!r) return 'No test-trade route captured yet.';
+  var src = r.source || 'unknown';
+  var payload = r.payload || 'unknown';
+  var state = (r.readyState === WebSocket.OPEN) ? 'OPEN' : String(r.readyState);
+  return 'WS source: ' + src + ' · payload: ' + payload + ' · readyState: ' + state;
+}
+
 // === MPB: Demo test trade executor ===
 // Shared helper used by the handler and the WS-capture poller.
 // Uses _mpbSafeWsSend to ensure the WebSocket is OPEN before sending and to
@@ -104,7 +163,7 @@ function _mpbExecTrade(eng, ws) {
   console.log('[MPB] demo test trade enqueued for pair:', pair, '— triggering send');
   // Craft a minimal openOrder base message and call ws.send() so the hook intercepts it,
   // pops our deal from futureDeals, and sends the correctly-formed order.
-  var baseMsg = '42' + JSON.stringify(['openOrder', {asset: pair, action: 'call', amount: 1, isDemo: 1, time: 60}]);
+  var baseMsg = _mpbBuildOpenOrderPayload(pair);
   _mpbSafeWsSend(ws, baseMsg, pair).catch(function(err) {
     // Clean up: only remove the specific deal we pushed if it is still in the queue
     var pending = eng.userInfo.futureDeals[dealIdx];
@@ -131,7 +190,7 @@ window.addEventListener('message', function(ev) {
     window.postMessage({belobot: true, info_text: '⚠ Engine not ready — reload page and try again.'}, window.location.href);
     return;
   }
-  var ws = window.__mpbWs;
+  var ws = _mpbResolveTradeWs();
   if (!ws || typeof ws.send !== 'function') {
     // WS not captured yet — poll up to 8 seconds for the platform to open a socket
     var _WS_POLL_TIMEOUT_MS = 8000;
@@ -140,7 +199,7 @@ window.addEventListener('message', function(ev) {
     window.postMessage({belobot: true, info_text: '⏳ WebSocket not captured yet — waiting for connection (up to 8s)...'}, window.location.href);
     var _pollStart = Date.now();
     var _pollId = setInterval(function() {
-      var _ws = window.__mpbWs;
+      var _ws = _mpbResolveTradeWs();
       if (_ws && typeof _ws.send === 'function') {
         clearInterval(_pollId);
         _mpbExecTrade(eng, _ws);
@@ -1246,7 +1305,8 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Test</button>'
       + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
       + '</div>'
-      + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>';
+      + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>'
+      + '<div id="mpb-trade-route" class="mpb-note" style="margin-top:4px;color:#9fb4d6;"></div>';
 
     slot.insertBefore(tile, slot.firstChild);
 
@@ -1254,11 +1314,19 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
     var runBtn     = tile.querySelector('#mpb-run-check');
     var demoBtn    = tile.querySelector('#mpb-demo-trade');
     var noteEl     = tile.querySelector('#mpb-sys-note');
+    var routeEl    = tile.querySelector('#mpb-trade-route');
+
+    function refreshTradeRoute(){
+      routeEl.textContent = 'Last route: ' + _mpbGetTradeRouteLabel();
+    }
+
+    refreshTradeRoute();
 
     runBtn.addEventListener('click', function(){
       var results = runChecks();
       renderResults(resultsEl, results);
       noteEl.textContent = '';
+      refreshTradeRoute();
     });
 
     // Demo test trade — requires double-click confirmation
@@ -1315,6 +1383,7 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
         }, window.location.href);
 
         noteEl.textContent = '✓ Demo test trade signal sent ($1). Check open trades to confirm.';
+        setTimeout(refreshTradeRoute, 50);
         mpbToast('Demo test trade placed ($1) — check open trades.', true);
       }
     });
