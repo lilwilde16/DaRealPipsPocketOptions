@@ -215,6 +215,44 @@ window.addEventListener('message', function(ev) {
 });
 
 
+// === MPB: Auto-trade executor — fires on every 'newDeal' signal from the engine ===
+// When the engine's checkDial() detects a signal and calls deal(), it pushes the deal
+// to futureDeals and fires this postMessage. Without this handler the deal would only
+// execute when the platform next sends its own outgoing WS message (e.g. a heartbeat).
+// This handler proactively triggers ws.send() so the engine's send interceptor fires
+// immediately and executes the queued trade without waiting for platform traffic.
+window.addEventListener('message', function(ev) {
+  var d = ev.data || {};
+  if (!d.belobot || d.act !== 'newDeal') return;
+  var eng = window.__mpbEngine;
+  if (!eng || !eng.settings.started) return;
+  if (!eng.userInfo.futureDeals.length) return;
+  var ws = _mpbResolveTradeWs();
+  if (!ws || typeof ws.send !== 'function') {
+    console.warn('[MPB] auto-trade: no WebSocket available — deal queued for next platform send');
+    return;
+  }
+  // Only send if the WebSocket is already OPEN to avoid async polling that could
+  // result in duplicate sends if multiple newDeal events fire in quick succession.
+  // If not open, the deal stays in futureDeals and the next natural platform send
+  // (intercepted by the engine's send hook) will execute it.
+  if (ws.readyState !== WebSocket.OPEN) {
+    console.warn('[MPB] auto-trade: WebSocket not open (readyState ' + ws.readyState + ') — deal queued for next platform send');
+    return;
+  }
+  // Build trigger payload from the last pending deal.
+  // The engine's send interceptor overwrites asset/action/amount with the actual deal values.
+  var deal = eng.userInfo.futureDeals[eng.userInfo.futureDeals.length - 1];
+  var payload = _mpbBuildOpenOrderPayload(deal.pair);
+  console.log('[MPB] auto-trade signal — pair:', deal.pair, 'action:', deal.dur, '— triggering send');
+  try {
+    ws.send(payload);
+  } catch (err) {
+    console.error('[MPB] auto-trade error:', err);
+  }
+});
+
+
 // === Money Printer Bot — UI Inject (Dark Neon) ===
 (function(){
   try {
@@ -1209,11 +1247,14 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
   var _mpbStreamSeen = false;
   window.addEventListener('message', function(e){
     var d = e.data||{};
-    if(d.belobot && (d.act === 'updateStream' || (typeof d.action === 'string' && d.action.indexOf('update') === 0))){
+    // Mark stream as seen when engine processes real WS market data or fires a trade signal
+    if(d.belobot && (
+      d.act === 'updateStream' ||
+      d.act === 'newDeal' ||
+      (typeof d.action === 'string' && d.action.indexOf('update') === 0)
+    )){
       _mpbStreamSeen = true;
     }
-    // The engine also posts robotSettings on readState — use any belobot message as a stream signal
-    if(d.belobot) _mpbStreamSeen = true;
   }, true);
 
   function qs(s, r){ return (r||document).querySelector(s); }
