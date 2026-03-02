@@ -93,6 +93,7 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "src/utils/wsFinder.js",
         "web_accessible_resources.js",
         "icon/*"
       ],

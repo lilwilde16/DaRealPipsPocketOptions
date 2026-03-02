@@ -155,6 +155,16 @@ function _mpbExecTrade(eng, ws) {
   var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
     ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
   eng.checkRate(pair);
+  // Try wsFinder direct send first — uses the verified working direct-send pattern
+  // that bypasses timing-sensitive polling and socket-rotation failures.
+  if (window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
+    var res = window.__wsFinder.sendDirectTrade(pair, 1);
+    console.log('[MPB] test-trade via wsFinder', res);
+    if (res.ok) {
+      window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
+      return;
+    }
+  }
   // Push a single demo deal to the queue: CALL direction, $1 amount, 1-minute expiry
   var dealIdx = eng.userInfo.futureDeals.length;
   eng.userInfo.futureDeals.push({pair: pair, dur: 'call', sum: 1});
@@ -192,6 +202,18 @@ window.addEventListener('message', function(ev) {
   }
   var ws = _mpbResolveTradeWs();
   if (!ws || typeof ws.send !== 'function') {
+    // Try wsFinder before starting the 8s poll — handles socket-rotation cases
+    // where __mpbTradeWs has rotated but wsFinder can still find a live socket.
+    if (window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
+      var _wsfPair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
+        ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
+      var _wsfRes = window.__wsFinder.sendDirectTrade(_wsfPair, 1);
+      console.log('[MPB] test-trade via wsFinder (no captured ws)', _wsfRes);
+      if (_wsfRes.ok) {
+        window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + _wsfPair + ')'}, window.location.href);
+        return;
+      }
+    }
     // WS not captured yet — poll up to 8 seconds for the platform to open a socket
     var _WS_POLL_TIMEOUT_MS = 8000;
     var _WS_POLL_INTERVAL_MS = 200;
