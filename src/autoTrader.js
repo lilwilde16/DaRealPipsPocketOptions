@@ -130,11 +130,22 @@
    * @param {string} pair      Asset symbol, e.g. 'EURUSD_otc'
    * @param {'call'|'put'} direction
    * @param {number} amount    Trade amount in USD
-   * @param {boolean} [isDemo] Force demo flag (default: true for safety)
+   * @param {boolean} [isDemo] Override isDemo flag. When omitted, uses the engine's
+   *                           current account type (real or demo).
    * @returns {string}  Socket.IO text frame ready to pass to ws.send()
    */
   function _buildFrame(pair, direction, amount, isDemo) {
-    var demo = (isDemo !== false) ? 1 : 0;
+    var demo;
+    if (isDemo === false || isDemo === 0) {
+      demo = 0;
+    } else if (isDemo === true || isDemo === 1) {
+      demo = 1;
+    } else {
+      // Default: use engine account type, fall back to demo for safety
+      demo = (window.__mpbEngine && window.__mpbEngine.userInfo &&
+              typeof window.__mpbEngine.userInfo.isDemo === 'boolean')
+        ? (window.__mpbEngine.userInfo.isDemo ? 1 : 0) : 1;
+    }
     var last = window.__mpbLastOpenOrderPayload;
     if (typeof last === 'string' && last.length > 4 &&
         last[0] === '4' && last[1] === '2') {
@@ -273,8 +284,8 @@
    * @param {string}  pair       Asset symbol, e.g. 'EURUSD_otc'
    * @param {'call'|'put'|'up'|'down'} direction
    * @param {number}  [amount=1] Trade amount in USD
-   * @param {boolean} [isDemo]   Defaults to true — always sends as demo unless
-   *                             explicitly set to false.
+   * @param {boolean} [isDemo]   When omitted, uses the engine's current account type
+   *                             (real or demo).  Pass true/false to override.
    * @returns {{ ok: boolean, reason?: string, payload?: string, readyState?: number }}
    */
   function sendOrder(pair, direction, amount, isDemo) {
@@ -286,7 +297,7 @@
     // skip wsFinder because its sendDirectTrade always sends 'call'.
     if (dir === 'call' &&
         window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
-      // wsFinder always sends as demo (isDemo:1) — safe default.
+      // wsFinder now respects engine account type (isDemo flag from engine.userInfo.isDemo).
       var res = window.__wsFinder.sendDirectTrade(pair, amt);
       if (!res.ok) {
         console.warn('[AutoTrader] sendOrder via wsFinder failed:', res.reason);
@@ -305,7 +316,7 @@
       return { ok: false, reason: 'socket not OPEN', readyState: ws.readyState };
     }
 
-    var payload = _buildFrame(pair, dir, amt, isDemo !== false);
+    var payload = _buildFrame(pair, dir, amt, isDemo);
 
     try {
       var sendFn = ws.oldSend || ws.send;

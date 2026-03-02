@@ -129,8 +129,17 @@
     return 100; // default: binary option
   }
 
+  function _getIsDemoFlag() {
+    var eng = window.__mpbEngine;
+    if (eng && eng.userInfo && typeof eng.userInfo.isDemo === 'boolean') {
+      return eng.userInfo.isDemo ? 1 : 0;
+    }
+    return 1; // safe default: demo when account type unknown
+  }
+
   function _buildPayload(pair, amount, requestId) {
     var optionType = _detectOptionTypeNumeric();
+    var isDemoFlag = _getIsDemoFlag();
     var last = window.__mpbLastOpenOrderPayload;
     if (typeof last === 'string' && last.length > 4 &&
         last[0] === '4' && last[1] === '2') {
@@ -140,14 +149,14 @@
           parsed[1].asset  = pair;
           parsed[1].action = 'call';
           parsed[1].amount = amount;
-          parsed[1].isDemo = 1;
+          parsed[1].isDemo = isDemoFlag;
           if (!parsed[1].time) parsed[1].time = 60;
           if (requestId !== undefined) parsed[1].requestId = requestId;
           return '42' + JSON.stringify(parsed);
         }
       } catch (_) {}
     }
-    var frame = {asset: pair, action: 'call', amount: amount, isDemo: 1,
+    var frame = {asset: pair, action: 'call', amount: amount, isDemo: isDemoFlag,
                  time: 60, option_type: optionType};
     if (requestId !== undefined) frame.requestId = requestId;
     return '42' + JSON.stringify(['openOrder', frame]);
@@ -157,7 +166,8 @@
    * sendDirectTrade — sends an openOrder frame directly to the live socket.
    * Uses ws.oldSend when available to bypass the engine deal-queue interceptor
    * and send the fully-formed payload immediately.
-   * Keeps isDemo:1 so it is always a demo trade.
+   * Uses the engine's current account type (isDemo from engine.userInfo.isDemo)
+   * so the trade goes to the correct account — demo or real.
    * @param {string} pair    Asset pair, e.g. 'EURUSD_otc'
    * @param {number} [amount=1]  Trade amount in USD
    * @returns {{ok: boolean, reason?: string, ws?: WebSocket, payload?: string,

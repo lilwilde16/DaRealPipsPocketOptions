@@ -110,8 +110,13 @@ function _mpbResolveTradeWs() {
 
 /**
  * Build an openOrder payload by reusing the last real payload when possible.
+ * Uses the engine's account type (isDemo) so real-account trades are not
+ * accidentally sent to demo.
  */
 function _mpbBuildOpenOrderPayload(pair) {
+  var isDemoFlag = (window.__mpbEngine && window.__mpbEngine.userInfo &&
+                   typeof window.__mpbEngine.userInfo.isDemo === 'boolean')
+    ? (window.__mpbEngine.userInfo.isDemo ? 1 : 0) : 1;
   var payload = window.__mpbLastOpenOrderPayload;
   if (typeof payload === 'string' && payload.length > 4 && payload[0] === '4' && payload[1] === '2') {
     try {
@@ -120,13 +125,13 @@ function _mpbBuildOpenOrderPayload(pair) {
         parsed[1].asset = pair;
         parsed[1].action = 'call';
         parsed[1].amount = 1;
-        parsed[1].isDemo = 1;
+        parsed[1].isDemo = isDemoFlag;
         if (!parsed[1].time) parsed[1].time = 60;
         return '42' + JSON.stringify(parsed);
       }
     } catch(_) {}
   }
-  return '42' + JSON.stringify(['openOrder', {asset: pair, action: 'call', amount: 1, isDemo: 1, time: 60}]);
+  return '42' + JSON.stringify(['openOrder', {asset: pair, action: 'call', amount: 1, isDemo: isDemoFlag, time: 60}]);
 }
 
 function _mpbSetTradeRouteMeta(meta) {
@@ -142,16 +147,10 @@ function _mpbGetTradeRouteLabel() {
   return 'WS source: ' + src + ' · payload: ' + payload + ' · readyState: ' + state;
 }
 
-// === MPB: Demo test trade executor ===
-// Shared helper used by the handler and the WS-capture poller.
-// Uses _mpbSafeWsSend to ensure the WebSocket is OPEN before sending and to
-// surface any errors. "Sent" is only logged after a confirmed ws.send() call.
+// === MPB: Trade executor — sends a test order on the current account (demo or real) ===
+// Uses autoTrader.sendOrder() which respects the engine's isDemo flag.
 function _mpbExecTrade(eng, ws) {
-  if (!eng.userInfo.isDemo) {
-    console.warn('[MPB] demo test trade blocked: not in demo mode');
-    window.postMessage({belobot: true, info_text: '⛔ Demo test trade blocked — switch to demo account first.'}, window.location.href);
-    return;
-  }
+  var accountLabel = eng.userInfo.isDemo ? 'demo' : 'REAL';
   var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
     ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
   eng.checkRate(pair);
@@ -161,7 +160,7 @@ function _mpbExecTrade(eng, ws) {
     console.log('[MPB] test-trade via autoTrader', res);
     if (res.ok) {
       eng.userInfo.openedDials++;
-      window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
+      window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + ']'}, window.location.href);
       return;
     }
   }
@@ -171,7 +170,7 @@ function _mpbExecTrade(eng, ws) {
     console.log('[MPB] test-trade via wsFinder', res);
     if (res.ok) {
       eng.userInfo.openedDials++;
-      window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
+      window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + ']'}, window.location.href);
       return;
     }
   }
@@ -180,35 +179,36 @@ function _mpbExecTrade(eng, ws) {
   eng.userInfo.futureDeals.push({pair: pair, dur: 'call', sum: 1});
   var wasStarted = eng.settings.started;
   eng.settings.started = true;
-  console.log('[MPB] demo test trade enqueued for pair:', pair, '— triggering send');
+  console.log('[MPB] test trade enqueued for pair:', pair, '[' + accountLabel + '] — triggering send');
   // Craft a minimal openOrder base message and call ws.send() so the hook intercepts it,
   // pops our deal from futureDeals, and sends the correctly-formed order.
   var baseMsg = _mpbBuildOpenOrderPayload(pair);
   _mpbSafeWsSend(ws, baseMsg, pair).then(function() {
-    window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
+    window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + ']'}, window.location.href);
   }).catch(function(err) {
     // Clean up: only remove the specific deal we pushed if it is still in the queue
     var pending = eng.userInfo.futureDeals[dealIdx];
     if (pending && pending.pair === pair && pending.dur === 'call' && pending.sum === 1) {
       eng.userInfo.futureDeals.splice(dealIdx, 1);
     }
-    console.error('[MPB] demo test trade error:', err);
-    window.postMessage({belobot: true, info_text: '⚠ Demo test trade failed: ' + String(err && err.message || err)}, window.location.href);
+    console.error('[MPB] test trade error:', err);
+    window.postMessage({belobot: true, info_text: '⚠ Test trade failed: ' + String(err && err.message || err)}, window.location.href);
   }).finally(function() {
     if (!wasStarted) eng.settings.started = false;
   });
 }
 
-// === MPB: Demo test trade handler ===
+// === MPB: Test trade handler ===
 // Handles the mpb_demo_test_trade postMessage from the System Check tile.
+// Sends a $1 test order on the current account (demo or real).
 // If the WebSocket is not yet captured, polls up to 8 s before giving up.
 window.addEventListener('message', function(ev) {
   var d = ev.data || {};
   if (!d.belobot || d.act !== 'mpb_demo_test_trade') return;
-  console.log('[MPB] demo test trade request received');
+  console.log('[MPB] test trade request received');
   var eng = window.__mpbEngine;
   if (!eng) {
-    console.warn('[MPB] demo test trade: engine not ready');
+    console.warn('[MPB] test trade: engine not ready');
     window.postMessage({belobot: true, info_text: '⚠ Engine not ready — reload page and try again.'}, window.location.href);
     return;
   }
@@ -223,14 +223,15 @@ window.addEventListener('message', function(ev) {
       console.log('[MPB] test-trade via autoTrader (no captured ws)', _atRes);
       if (_atRes.ok) {
         eng.userInfo.openedDials++;
-        window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + _atPair + ')'}, window.location.href);
+        var _acct = eng.userInfo.isDemo ? 'demo' : 'REAL';
+        window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + _atPair + ') [' + _acct + ']'}, window.location.href);
         return;
       }
     }
     // WS not captured yet — poll up to 8 seconds for the platform to open a socket
     var _WS_POLL_TIMEOUT_MS = 8000;
     var _WS_POLL_INTERVAL_MS = 200;
-    console.warn('[MPB] demo test trade: WebSocket not captured yet — polling up to 8 seconds...');
+    console.warn('[MPB] test trade: WebSocket not captured yet — polling up to 8 seconds...');
     window.postMessage({belobot: true, info_text: '⏳ WebSocket not captured yet — waiting for connection (up to 8s)...'}, window.location.href);
     var _pollStart = Date.now();
     var _pollId = setInterval(function() {
@@ -240,7 +241,7 @@ window.addEventListener('message', function(ev) {
         _mpbExecTrade(eng, _ws);
       } else if (Date.now() - _pollStart >= _WS_POLL_TIMEOUT_MS) {
         clearInterval(_pollId);
-        console.warn('[MPB] demo test trade: WebSocket not captured after 8 seconds');
+        console.warn('[MPB] test trade: WebSocket not captured after 8 seconds');
         window.postMessage({belobot: true, info_text: '⚠ WebSocket not captured — interact with the page first, then retry.'}, window.location.href);
       }
     }, _WS_POLL_INTERVAL_MS);
@@ -250,14 +251,13 @@ window.addEventListener('message', function(ev) {
 });
 
 
-// === MPB: Demo martingale test handler ===
-// Handles mpb_demo_martingale_test: runs two demo trades in sequence.
+// === MPB: Martingale test handler ===
+// Handles mpb_demo_martingale_test: runs two trades in sequence on the current account.
 // After the first trade, simulates a close outcome after a short delay.
 // If the first trade is a loss (default), the second doubles the amount via
 // the autoTrader martingale logic.  If the first trade is a win, the state
 // resets and the second keeps the same base amount.
 // Set window.__mpbSimulateMartingaleWin = true before triggering to test the win path.
-// All trades are demo-only (isDemo:1) and use autoTrader.sendOrder().
 window.addEventListener('message', function(ev) {
   var d = ev.data || {};
   if (!d.belobot || d.act !== 'mpb_demo_martingale_test') return;
@@ -268,10 +268,6 @@ window.addEventListener('message', function(ev) {
     window.postMessage({belobot: true, info_text: '⚠ Engine not ready — reload page and try again.'}, window.location.href);
     return;
   }
-  if (!eng.userInfo.isDemo) {
-    window.postMessage({belobot: true, info_text: '⛔ Martingale test blocked — switch to demo account first.'}, window.location.href);
-    return;
-  }
   if (!window.__mpbAutoTrader || typeof window.__mpbAutoTrader.sendOrder !== 'function') {
     window.postMessage({belobot: true, info_text: '⚠ AutoTrader not available — reload and try again.'}, window.location.href);
     return;
@@ -279,6 +275,7 @@ window.addEventListener('message', function(ev) {
   var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
     ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
   var firstAmount = d.amount || 1;
+  var accountLabel = eng.userInfo.isDemo ? 'demo' : 'REAL';
 
   // Reset any stale martingale state for this pair so the test always starts clean.
   window.__mpbAutoTrader.resetMartingale(pair);
@@ -292,7 +289,7 @@ window.addEventListener('message', function(ev) {
     return;
   }
   eng.userInfo.openedDials++;
-  window.postMessage({belobot: true, info_text: '⚡ Martingale test: trade 1 sent ($' + firstAmount + ' ' + pair + '). Simulating outcome…'}, window.location.href);
+  window.postMessage({belobot: true, info_text: '⚡ Martingale test: trade 1 sent ($' + firstAmount + ' ' + pair + ') [' + accountLabel + ']. Simulating outcome…'}, window.location.href);
 
   // Simulate close after a short delay (3 s by default, configurable via window.__mpbMartingaleSimDelayMs).
   // window.__mpbSimulateMartingaleWin = true flips the first trade to a win for testing.
@@ -1472,10 +1469,11 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '<div id="mpb-sys-results" style="margin:8px 0;min-height:24px;"></div>'
       + '<div class="mpb-tile__row" style="gap:8px;margin-top:6px;">'
       + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Test</button>'
-      + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
+      + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Test Trade ($1)</button>'
       + '</div>'
       + '<div class="mpb-tile__row" style="gap:8px;margin-top:4px;">'
-      + '  <button id="mpb-demo-martin" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(20,255,114,.4);color:#14ff72;">🔁 Place Demo Martingale Test (2x)</button>'
+      + '  <button id="mpb-demo-martin" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(20,255,114,.4);color:#14ff72;">🔁 Place Martingale Test (2x)</button>'
+      + '  <button id="mpb-copy-debug" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(148,163,184,.4);color:#9fb4d6;">📋 Copy Troubleshoot</button>'
       + '</div>'
       + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>'
       + '<div id="mpb-trade-route" class="mpb-note" style="margin-top:4px;color:#9fb4d6;"></div>';
@@ -1486,6 +1484,7 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
     var runBtn      = tile.querySelector('#mpb-run-check');
     var demoBtn     = tile.querySelector('#mpb-demo-trade');
     var martinBtn   = tile.querySelector('#mpb-demo-martin');
+    var copyDbgBtn  = tile.querySelector('#mpb-copy-debug');
     var noteEl      = tile.querySelector('#mpb-sys-note');
     var routeEl     = tile.querySelector('#mpb-trade-route');
 
@@ -1502,32 +1501,28 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       refreshTradeRoute();
     });
 
-    // Demo test trade — requires double-click confirmation
+    // Test trade — requires double-click confirmation
     var _demoConfirmPending = false;
     var _demoConfirmTimer = null;
 
     function _cancelDemoConfirm(){
       if(_demoConfirmTimer){ clearTimeout(_demoConfirmTimer); _demoConfirmTimer = null; }
       _demoConfirmPending = false;
-      demoBtn.textContent = '⚡ Place Demo Test Trade ($1)';
+      demoBtn.textContent = '⚡ Place Test Trade ($1)';
       demoBtn.style.borderColor = 'rgba(255,213,77,.5)';
     }
     // Clear pending confirmation on page hide to avoid stale callbacks
     window.addEventListener('pagehide', _cancelDemoConfirm, {once: true});
 
     demoBtn.addEventListener('click', function(){
-      // Gate: only in demo
-      if(!isDemo()){
-        noteEl.textContent = '⛔ Not in demo mode — test trade blocked.';
-        return;
-      }
-
+      var onReal = !isDemo();
       if(!_demoConfirmPending){
         // First click — ask for confirmation
         _demoConfirmPending = true;
-        demoBtn.textContent = '⚠ Click again to confirm demo trade';
+        demoBtn.textContent = '⚠ Click again to confirm trade';
         demoBtn.style.borderColor = 'rgba(255,71,105,.7)';
-        noteEl.textContent = 'Click the button again within 5 seconds to confirm placing a $1 demo test trade.';
+        var acctWarn = onReal ? ' ⚠ You are on a REAL account — this places a real $1 trade.' : '';
+        noteEl.textContent = 'Click the button again within 5 seconds to confirm placing a $1 test trade.' + acctWarn;
         _demoConfirmTimer = setTimeout(function(){
           _cancelDemoConfirm();
           noteEl.textContent = 'Confirmation timed out. No trade placed.';
@@ -1537,53 +1532,43 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
         clearTimeout(_demoConfirmTimer);
         _demoConfirmTimer = null;
         _demoConfirmPending = false;
-        demoBtn.textContent = '⚡ Place Demo Test Trade ($1)';
+        demoBtn.textContent = '⚡ Place Test Trade ($1)';
         demoBtn.style.borderColor = 'rgba(255,213,77,.5)';
 
-        // Final demo guard before placing
-        if(!isDemo()){
-          noteEl.textContent = '⛔ Not in demo mode — test trade blocked.';
-          return;
-        }
-
-        // Dispatch a demo test-trade event — the engine handler takes care of pair selection,
-        // isDemo guard, and WebSocket send.
+        // Dispatch test-trade event — the engine handler handles pair selection and WebSocket send.
         window.postMessage({
           belobot: true,
           act: 'mpb_demo_test_trade',
-          amount: 1,
-          isDemo: true
+          amount: 1
         }, window.location.href);
 
-        noteEl.textContent = '✓ Demo test trade signal sent ($1). Check open trades to confirm.';
+        var acctLabel = isDemo() ? 'demo' : 'REAL';
+        noteEl.textContent = '✓ Test trade signal sent ($1) [' + acctLabel + ']. Check open trades to confirm.';
         setTimeout(refreshTradeRoute, 50);
-        mpbToast('Demo test trade placed ($1) — check open trades.', true);
+        mpbToast('Test trade placed ($1) [' + acctLabel + '] — check open trades.', true);
       }
     });
 
-    // Martingale test (2x) — double-click confirmation, same guard as demo trade
+    // Martingale test (2x) — double-click confirmation
     var _martinConfirmPending = false;
     var _martinConfirmTimer = null;
 
     function _cancelMartinConfirm(){
       if(_martinConfirmTimer){ clearTimeout(_martinConfirmTimer); _martinConfirmTimer = null; }
       _martinConfirmPending = false;
-      martinBtn.textContent = '🔁 Place Demo Martingale Test (2x)';
+      martinBtn.textContent = '🔁 Place Martingale Test (2x)';
       martinBtn.style.borderColor = 'rgba(20,255,114,.4)';
     }
     window.addEventListener('pagehide', _cancelMartinConfirm, {once: true});
 
     martinBtn.addEventListener('click', function(){
-      if(!isDemo()){
-        noteEl.textContent = '⛔ Not in demo mode — martingale test blocked.';
-        return;
-      }
-
+      var onReal = !isDemo();
       if(!_martinConfirmPending){
         _martinConfirmPending = true;
         martinBtn.textContent = '⚠ Click again to confirm martingale test';
         martinBtn.style.borderColor = 'rgba(255,71,105,.7)';
-        noteEl.textContent = 'Click again within 5 s to run 2 sequential demo trades (default: simulates loss → T2 doubles; set window.__mpbSimulateMartingaleWin=true to test win path).';
+        var acctWarn = onReal ? ' ⚠ REAL account — 2 real trades will be placed.' : '';
+        noteEl.textContent = 'Click again within 5 s to run 2 sequential trades (loss → T2 doubles; set window.__mpbSimulateMartingaleWin=true to test win path).' + acctWarn;
         _martinConfirmTimer = setTimeout(function(){
           _cancelMartinConfirm();
           noteEl.textContent = 'Martingale test confirmation timed out. No trades placed.';
@@ -1592,27 +1577,77 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
         clearTimeout(_martinConfirmTimer);
         _martinConfirmTimer = null;
         _martinConfirmPending = false;
-        martinBtn.textContent = '🔁 Place Demo Martingale Test (2x)';
+        martinBtn.textContent = '🔁 Place Martingale Test (2x)';
         martinBtn.style.borderColor = 'rgba(20,255,114,.4)';
-
-        if(!isDemo()){
-          noteEl.textContent = '⛔ Not in demo mode — martingale test blocked.';
-          return;
-        }
 
         window.postMessage({
           belobot: true,
           act: 'mpb_demo_martingale_test',
-          amount: 1,
-          isDemo: true
+          amount: 1
         }, window.location.href);
 
-        noteEl.textContent = '⚡ Martingale test started ($1). Watch for 2 trades…';
+        var acctLabel = isDemo() ? 'demo' : 'REAL';
+        noteEl.textContent = '⚡ Martingale test started ($1) [' + acctLabel + ']. Watch for 2 trades…';
         setTimeout(refreshTradeRoute, 50);
-        mpbToast('Martingale test running (2 demo trades)…', true);
+        mpbToast('Martingale test running (2 trades) [' + acctLabel + ']…', true);
       }
     });
-  }
+
+    // Troubleshooting snippet — copies diagnostic code to clipboard
+    copyDbgBtn.addEventListener('click', function(){
+      var snippet = [
+        '// === MPB Troubleshoot — paste in browser DevTools console ===',
+        '(function() {',
+        '  try {',
+        '    var e = window.__mpbEngine;',
+        '    var w = window.__mpbWs;',
+        '    var p = window.__mpbWsPool || [];',
+        '    var lp = window.__mpbLastOpenOrderPayload;',
+        '    var wf = window.__wsFinder;',
+        '    console.group("[MPB Troubleshoot]");',
+        '    if (e) {',
+        '      var ui = e.userInfo || {};',
+        '      var st = e.settings || {};',
+        '      console.log("Engine: OK");',
+        '      console.log("  started:", st.started);',
+        '      console.log("  isDemo:", ui.isDemo);',
+        '      console.log("  balance:", JSON.stringify(ui.balance));',
+        '      console.log("  selected_pairs:", JSON.stringify(st.selected_pairs));',
+        '      console.log("  futureDeals:", (ui.futureDeals || []).length);',
+        '    } else {',
+        '      console.warn("Engine: MISSING — reload page");',
+        '    }',
+        '    console.log("WS:", w ? ("readyState=" + w.readyState + " hasOldSend=" + !!w.oldSend) : "MISSING");',
+        '    console.log("WS pool:", p.length, "sockets");',
+        '    for (var i = 0; i < p.length; i++) {',
+        '      console.log("  pool[" + i + "] readyState=" + p[i].readyState + " url=" + (p[i].url || "?"));',
+        '    }',
+        '    console.log("wsFinder:", wf ? "OK" : "MISSING");',
+        '    if (wf && typeof wf.collectCandidates === "function") {',
+        '      var cs = wf.collectCandidates();',
+        '      console.log("  Live candidates:", cs.length);',
+        '      for (var j = 0; j < cs.length; j++) {',
+        '        console.log("    candidate[" + j + "] readyState=" + cs[j].readyState + " url=" + (cs[j].url || "?"));',
+        '      }',
+        '    }',
+        '    console.log("Last payload:", lp ? lp.substring(0, 120) : "NONE");',
+        '    console.groupEnd();',
+        '    return { engine: e, ws: w, wsFinder: wf };',
+        '  } catch (err) { console.error("[MPB Troubleshoot] error:", err); }',
+        '})();'
+      ].join('\n');
+      try {
+        navigator.clipboard.writeText(snippet).then(function(){
+          noteEl.textContent = '📋 Troubleshoot code copied! Paste it in the browser console (F12 → Console tab).';
+          mpbToast('Troubleshoot code copied to clipboard.', true);
+        }).catch(function(){
+          noteEl.textContent = snippet;
+        });
+      } catch(e) {
+        noteEl.textContent = snippet;
+      }
+    });
+  } // end mountSystemCheck
 
   // Auto-mount: call immediately if modal is already present, and observe for it appearing.
   // Disconnect the observer once the tile is successfully mounted; the setInterval handles recovery.
