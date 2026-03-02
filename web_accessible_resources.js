@@ -161,6 +161,7 @@ function _mpbExecTrade(eng, ws) {
     var res = window.__wsFinder.sendDirectTrade(pair, 1);
     console.log('[MPB] test-trade via wsFinder', res);
     if (res.ok) {
+      eng.userInfo.openedDials++;
       window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
       return;
     }
@@ -234,6 +235,75 @@ window.addEventListener('message', function(ev) {
     return;
   }
   _mpbExecTrade(eng, ws);
+});
+
+
+// === MPB: Demo martingale test handler ===
+// Handles mpb_demo_martingale_test: runs two demo trades in sequence.
+// After the first trade, simulates a close outcome after a short delay.
+// If the first trade is a loss (default), the second doubles the amount (martingale).
+// If the first trade is a win, the second keeps the same amount.
+// Set window.__mpbSimulateMartingaleWin = true before triggering to test the win path.
+// All trades are demo-only (isDemo:1) and use sendDirectTrade.
+window.addEventListener('message', function(ev) {
+  var d = ev.data || {};
+  if (!d.belobot || d.act !== 'mpb_demo_martingale_test') return;
+  console.log('[MPB] martingale test request received');
+  var eng = window.__mpbEngine;
+  if (!eng) {
+    console.warn('[MPB] martingale test: engine not ready');
+    window.postMessage({belobot: true, info_text: '⚠ Engine not ready — reload page and try again.'}, window.location.href);
+    return;
+  }
+  if (!eng.userInfo.isDemo) {
+    window.postMessage({belobot: true, info_text: '⛔ Martingale test blocked — switch to demo account first.'}, window.location.href);
+    return;
+  }
+  if (!window.__wsFinder || typeof window.__wsFinder.sendDirectTrade !== 'function') {
+    window.postMessage({belobot: true, info_text: '⚠ wsFinder not available — reload and try again.'}, window.location.href);
+    return;
+  }
+  var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
+    ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
+  var firstAmount = d.amount || 1;
+
+  // Send first trade.
+  eng.checkRate(pair);
+  var r1 = window.__wsFinder.sendDirectTrade(pair, firstAmount);
+  console.log('[MPB] martingale test: trade 1', r1);
+  if (!r1.ok) {
+    window.postMessage({belobot: true, info_text: '⚠ Martingale test: first trade failed — ' + (r1.reason || 'unknown error')}, window.location.href);
+    return;
+  }
+  eng.userInfo.openedDials++;
+  window.postMessage({belobot: true, info_text: '⚡ Martingale test: trade 1 sent ($' + firstAmount + ' ' + pair + '). Simulating outcome…'}, window.location.href);
+
+  // Simulate close after a short delay (3 s by default, configurable via window.__mpbMartingaleSimDelayMs).
+  // window.__mpbSimulateMartingaleWin = true flips the first trade to a win for testing.
+  var simDelay = (typeof window.__mpbMartingaleSimDelayMs === 'number') ? window.__mpbMartingaleSimDelayMs : 3000;
+  setTimeout(function() {
+    var firstWin = !!window.__mpbSimulateMartingaleWin;
+    var secondAmount = firstWin
+      ? Math.floor(firstAmount * 100) / 100
+      : Math.floor(firstAmount * 2 * 100) / 100;
+    var outcomeLabel = firstWin ? '✅ win (simulated)' : '❌ loss (simulated)';
+    console.log('[MPB] martingale test: trade 1 outcome:', outcomeLabel,
+      '— trade 2 amount:', secondAmount);
+
+    // Send second trade.
+    eng.checkRate(pair);
+    var r2 = window.__wsFinder.sendDirectTrade(pair, secondAmount);
+    console.log('[MPB] martingale test: trade 2', r2);
+    if (!r2.ok) {
+      window.postMessage({belobot: true, info_text: '⚠ Martingale test: trade 2 failed — ' + (r2.reason || 'unknown error')}, window.location.href);
+      return;
+    }
+    eng.userInfo.openedDials++;
+    var label = firstWin
+      ? '✅ Martingale test done: T1 win → T2 $' + secondAmount + ' (same)'
+      : '✅ Martingale test done: T1 loss → T2 $' + secondAmount + ' (doubled)';
+    window.postMessage({belobot: true, info_text: label}, window.location.href);
+  }, simDelay);
 });
 
 
@@ -1368,16 +1438,20 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Test</button>'
       + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
       + '</div>'
+      + '<div class="mpb-tile__row" style="gap:8px;margin-top:4px;">'
+      + '  <button id="mpb-demo-martin" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(20,255,114,.4);color:#14ff72;">🔁 Place Demo Martingale Test (2x)</button>'
+      + '</div>'
       + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>'
       + '<div id="mpb-trade-route" class="mpb-note" style="margin-top:4px;color:#9fb4d6;"></div>';
 
     slot.insertBefore(tile, slot.firstChild);
 
-    var resultsEl  = tile.querySelector('#mpb-sys-results');
-    var runBtn     = tile.querySelector('#mpb-run-check');
-    var demoBtn    = tile.querySelector('#mpb-demo-trade');
-    var noteEl     = tile.querySelector('#mpb-sys-note');
-    var routeEl    = tile.querySelector('#mpb-trade-route');
+    var resultsEl   = tile.querySelector('#mpb-sys-results');
+    var runBtn      = tile.querySelector('#mpb-run-check');
+    var demoBtn     = tile.querySelector('#mpb-demo-trade');
+    var martinBtn   = tile.querySelector('#mpb-demo-martin');
+    var noteEl      = tile.querySelector('#mpb-sys-note');
+    var routeEl     = tile.querySelector('#mpb-trade-route');
 
     function refreshTradeRoute(){
       routeEl.textContent = 'Last route: ' + _mpbGetTradeRouteLabel();
@@ -1448,6 +1522,58 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
         noteEl.textContent = '✓ Demo test trade signal sent ($1). Check open trades to confirm.';
         setTimeout(refreshTradeRoute, 50);
         mpbToast('Demo test trade placed ($1) — check open trades.', true);
+      }
+    });
+
+    // Martingale test (2x) — double-click confirmation, same guard as demo trade
+    var _martinConfirmPending = false;
+    var _martinConfirmTimer = null;
+
+    function _cancelMartinConfirm(){
+      if(_martinConfirmTimer){ clearTimeout(_martinConfirmTimer); _martinConfirmTimer = null; }
+      _martinConfirmPending = false;
+      martinBtn.textContent = '🔁 Place Demo Martingale Test (2x)';
+      martinBtn.style.borderColor = 'rgba(20,255,114,.4)';
+    }
+    window.addEventListener('pagehide', _cancelMartinConfirm, {once: true});
+
+    martinBtn.addEventListener('click', function(){
+      if(!isDemo()){
+        noteEl.textContent = '⛔ Not in demo mode — martingale test blocked.';
+        return;
+      }
+
+      if(!_martinConfirmPending){
+        _martinConfirmPending = true;
+        martinBtn.textContent = '⚠ Click again to confirm martingale test';
+        martinBtn.style.borderColor = 'rgba(255,71,105,.7)';
+        noteEl.textContent = 'Click again within 5 s to run 2 sequential demo trades (default: simulates loss → T2 doubles; set window.__mpbSimulateMartingaleWin=true to test win path).';
+        _martinConfirmTimer = setTimeout(function(){
+          _cancelMartinConfirm();
+          noteEl.textContent = 'Martingale test confirmation timed out. No trades placed.';
+        }, 5000);
+      } else {
+        clearTimeout(_martinConfirmTimer);
+        _martinConfirmTimer = null;
+        _martinConfirmPending = false;
+        martinBtn.textContent = '🔁 Place Demo Martingale Test (2x)';
+        martinBtn.style.borderColor = 'rgba(20,255,114,.4)';
+
+        if(!isDemo()){
+          noteEl.textContent = '⛔ Not in demo mode — martingale test blocked.';
+          return;
+        }
+
+        window.postMessage({
+          belobot: true,
+          act: 'mpb_demo_martingale_test',
+          amount: 1,
+          isDemo: true
+        }, window.location.href);
+
+        noteEl.textContent = '⚡ Martingale test started ($1). Watch for 2 trades…';
+        setTimeout(refreshTradeRoute, 50);
+        mpbToast('Martingale test running (2 demo trades)…', true);
       }
     });
   }
