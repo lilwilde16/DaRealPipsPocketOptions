@@ -161,6 +161,9 @@ function _mpbExecTrade(eng, ws) {
     var res = window.__wsFinder.sendDirectTrade(pair, 1);
     console.log('[MPB] test-trade via wsFinder', res);
     if (res.ok) {
+      // sendDirectTrade bypasses the engine interceptor so we manually keep
+      // the engine counters consistent (the interceptor normally does this).
+      eng.userInfo.openedDials++;
       window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
       return;
     }
@@ -210,6 +213,8 @@ window.addEventListener('message', function(ev) {
       var _wsfRes = window.__wsFinder.sendDirectTrade(_wsfPair, 1);
       console.log('[MPB] test-trade via wsFinder (no captured ws)', _wsfRes);
       if (_wsfRes.ok) {
+        // Manually increment counter since interceptor is bypassed.
+        eng.userInfo.openedDials++;
         window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + _wsfPair + ')'}, window.location.href);
         return;
       }
@@ -234,6 +239,125 @@ window.addEventListener('message', function(ev) {
     return;
   }
   _mpbExecTrade(eng, ws);
+});
+
+
+// === MPB: Martingale test handler (real-result driven) ===
+// Listens for 'mpb_demo_martingale_test' postMessage. Sends a first demo trade,
+// then wraps engine.update to catch the real successcloseOrder response and
+// determine the second trade amount based on actual profit (no simulations).
+var _mpbMartingaleInProgress = false; // guard against concurrent tests
+window.addEventListener('message', function(ev) {
+  var d = ev.data || {};
+  if (!d.belobot || d.act !== 'mpb_demo_martingale_test') return;
+
+  var eng = window.__mpbEngine;
+  if (!eng) {
+    console.warn('[MPB] martingale test: engine not ready');
+    window.postMessage({belobot: true, info_text: '⚠ Engine not ready — reload page and retry.'}, window.location.href);
+    return;
+  }
+  if (!eng.userInfo.isDemo) {
+    console.warn('[MPB] martingale test: not in demo mode');
+    window.postMessage({belobot: true, info_text: '⛔ Martingale test blocked — switch to demo account first.'}, window.location.href);
+    return;
+  }
+  if (!window.__wsFinder || typeof window.__wsFinder.sendDirectTrade !== 'function') {
+    console.warn('[MPB] martingale test: wsFinder not available');
+    window.postMessage({belobot: true, info_text: '⚠ wsFinder not available — reload and retry.'}, window.location.href);
+    return;
+  }
+  if (_mpbMartingaleInProgress) {
+    console.warn('[MPB] martingale test: test already in progress');
+    window.postMessage({belobot: true, info_text: '⚠ Martingale test already in progress — wait for it to complete.'}, window.location.href);
+    return;
+  }
+
+  var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
+    ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
+  var firstAmount = 1;
+  var MARTINGALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  eng.checkRate(pair);
+
+  // Send first trade via wsFinder direct send.
+  var res1 = window.__wsFinder.sendDirectTrade(pair, firstAmount);
+  console.log('[MPB] martingale test: first trade', res1);
+  if (!res1.ok) {
+    window.postMessage({belobot: true, info_text: '⚠ Martingale test: first trade failed — ' + res1.reason}, window.location.href);
+    return;
+  }
+  // Bookkeeping: sendDirectTrade bypasses the engine interceptor so we increment manually.
+  eng.userInfo.openedDials++;
+  _mpbMartingaleInProgress = true;
+  var requestId1 = res1.requestId;
+  var firstSendTs = Date.now();
+
+  console.log('[MPB] martingale test: first trade sent, requestId=' + requestId1 +
+    ', pair=' + pair + ', amount=' + firstAmount + ' — waiting for real close...');
+  window.postMessage({belobot: true, info_text: '⏳ Martingale test: first trade sent ($' +
+    firstAmount + ' ' + pair + '), waiting for real result...'}, window.location.href);
+
+  // Hook engine.update to intercept the real successcloseOrder response.
+  var _origUpdate = eng.update;
+  var _hookDone = false;
+
+  function _finishHook() {
+    if (!_hookDone) {
+      _hookDone = true;
+      _mpbMartingaleInProgress = false;
+      eng.update = _origUpdate;
+    }
+  }
+
+  // Safety timeout in case the trade never closes.
+  var _hookTimeout = setTimeout(function() {
+    _finishHook();
+    console.warn('[MPB] martingale test: timeout waiting for first trade close');
+    window.postMessage({belobot: true, info_text: '⚠ Martingale test: timed out waiting for first trade result.'}, window.location.href);
+  }, MARTINGALE_TIMEOUT_MS);
+
+  eng.update = function _mpbMartingaleHook(data) {
+    // Capture action before original resets it to false at end of update().
+    var capturedAction = eng.action;
+    var result = _origUpdate.call(eng, data);
+
+    if (!_hookDone && capturedAction === 'successcloseOrder' &&
+        data && data.deals && Array.isArray(data.deals)) {
+      for (var i = 0; i < data.deals.length; i++) {
+        var deal = data.deals[i];
+        // Correlate by matching asset + amount within the timeout window.
+        if (deal.asset === pair &&
+            Math.abs((deal.amount || 0) - firstAmount) < 0.01 &&
+            (Date.now() - firstSendTs) < MARTINGALE_TIMEOUT_MS) {
+
+          clearTimeout(_hookTimeout);
+          _finishHook();
+
+          var profit = deal.profit || 0;
+          var isLoss = profit <= 0;
+          var secondAmount = isLoss ? Math.round(firstAmount * 2 * 100) / 100 : firstAmount;
+
+          console.log('[MPB] martingale test: first trade closed — profit=' + profit +
+            ', isLoss=' + isLoss + ', secondAmount=' + secondAmount);
+
+          // Send second trade based on real result.
+          var res2 = window.__wsFinder.sendDirectTrade(pair, secondAmount);
+          console.log('[MPB] martingale test: second trade', res2);
+          if (res2.ok) {
+            eng.userInfo.openedDials++;
+            window.postMessage({belobot: true, info_text: '✅ Martingale test: 1st trade ' +
+              (isLoss ? 'LOSS (profit=' + profit + ')' : 'WIN (profit=' + profit + ')') +
+              ' → 2nd trade $' + secondAmount + ' sent (requestId=' + res2.requestId + ')'
+            }, window.location.href);
+          } else {
+            window.postMessage({belobot: true, info_text: '⚠ Martingale test: 1st trade closed but 2nd trade failed — ' + res2.reason}, window.location.href);
+          }
+          break;
+        }
+      }
+    }
+    return result;
+  };
 });
 
 
@@ -1368,6 +1492,9 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
       + '  <button id="mpb-run-check" class="mpb-btn" style="font-size:11px;padding:6px 12px;">Test</button>'
       + '  <button id="mpb-demo-trade" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(255,213,77,.5);color:#ffd24d;">⚡ Place Demo Test Trade ($1)</button>'
       + '</div>'
+      + '<div class="mpb-tile__row" style="gap:8px;margin-top:6px;">'
+      + '  <button id="mpb-demo-martin" class="mpb-btn" style="font-size:11px;padding:6px 12px;border-color:rgba(100,200,100,.5);color:#7dffb3;">🔁 Place Demo Martingale Test (2x)</button>'
+      + '</div>'
       + '<div id="mpb-sys-note" class="mpb-note" style="margin-top:6px;"></div>'
       + '<div id="mpb-trade-route" class="mpb-note" style="margin-top:4px;color:#9fb4d6;"></div>';
 
@@ -1376,6 +1503,7 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
     var resultsEl  = tile.querySelector('#mpb-sys-results');
     var runBtn     = tile.querySelector('#mpb-run-check');
     var demoBtn    = tile.querySelector('#mpb-demo-trade');
+    var martinBtn  = tile.querySelector('#mpb-demo-martin');
     var noteEl     = tile.querySelector('#mpb-sys-note');
     var routeEl    = tile.querySelector('#mpb-trade-route');
 
@@ -1448,6 +1576,55 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
         noteEl.textContent = '✓ Demo test trade signal sent ($1). Check open trades to confirm.';
         setTimeout(refreshTradeRoute, 50);
         mpbToast('Demo test trade placed ($1) — check open trades.', true);
+      }
+    });
+
+    // Martingale test — requires double-click confirmation
+    var _martinConfirmPending = false;
+    var _martinConfirmTimer = null;
+
+    function _cancelMartinConfirm(){
+      if(_martinConfirmTimer){ clearTimeout(_martinConfirmTimer); _martinConfirmTimer = null; }
+      _martinConfirmPending = false;
+      martinBtn.textContent = '🔁 Place Demo Martingale Test (2x)';
+      martinBtn.style.borderColor = 'rgba(100,200,100,.5)';
+    }
+    window.addEventListener('pagehide', _cancelMartinConfirm, {once: true});
+
+    martinBtn.addEventListener('click', function(){
+      if(!isDemo()){
+        noteEl.textContent = '⛔ Not in demo mode — martingale test blocked.';
+        return;
+      }
+      if(!_martinConfirmPending){
+        _martinConfirmPending = true;
+        martinBtn.textContent = '⚠ Click again to confirm martingale test';
+        martinBtn.style.borderColor = 'rgba(255,71,105,.7)';
+        noteEl.textContent = 'Click again within 5 seconds to confirm 2-trade martingale test ($1 first, then real-result driven).';
+        _martinConfirmTimer = setTimeout(function(){
+          _cancelMartinConfirm();
+          noteEl.textContent = 'Confirmation timed out. No trade placed.';
+        }, 5000);
+      } else {
+        clearTimeout(_martinConfirmTimer);
+        _martinConfirmTimer = null;
+        _martinConfirmPending = false;
+        martinBtn.textContent = '🔁 Place Demo Martingale Test (2x)';
+        martinBtn.style.borderColor = 'rgba(100,200,100,.5)';
+
+        if(!isDemo()){
+          noteEl.textContent = '⛔ Not in demo mode — martingale test blocked.';
+          return;
+        }
+
+        window.postMessage({
+          belobot: true,
+          act: 'mpb_demo_martingale_test',
+          isDemo: true
+        }, window.location.href);
+
+        noteEl.textContent = '⏳ Martingale test started — waiting for real trade result...';
+        setTimeout(refreshTradeRoute, 50);
       }
     });
   }

@@ -128,7 +128,7 @@
    * Keeps isDemo:1 so it is always a demo trade.
    * @param {string} pair    Asset pair, e.g. 'EURUSD_otc'
    * @param {number} [amount=1]  Trade amount in USD
-   * @returns {{ok: boolean, reason?: string, ws?: WebSocket, payload?: string}}
+   * @returns {{ok: boolean, reason?: string, ws?: WebSocket, payload?: string, requestId?: number, url?: string}}
    */
   function sendDirectTrade(pair, amount) {
     var ws = pickLiveSocket();
@@ -142,6 +142,10 @@
       return {ok: false, reason: 'socket not OPEN', readyState: ws.readyState};
     }
     var amt = (amount !== null && amount !== undefined) ? amount : 1;
+    // Generate a unique numeric requestId using a per-session counter + timestamp component.
+    // The counter avoids collisions for rapid back-to-back calls within the same millisecond.
+    window.__mpbWsFinderReqCounter = (window.__mpbWsFinderReqCounter || 0) + 1;
+    var requestId = (Date.now() % 1000000000) * 10000 + (window.__mpbWsFinderReqCounter % 10000);
     var payload = _buildPayload(pair, amt);
     try {
       // Prefer oldSend to bypass the engine's deal-queue interceptor.
@@ -149,9 +153,17 @@
       // __mpbTradeWs / __mpbLastOpenOrderPayload are updated as expected.
       var sendFn = ws.oldSend || ws.send;
       sendFn.call(ws, payload);
+      // Record in the pending-by-requestId map for later correlation.
+      window.__mpbPendingByRequestId = window.__mpbPendingByRequestId || {};
+      window.__mpbPendingByRequestId[requestId] = {
+        pair: pair, amount: amt, ts: Date.now(), raw: payload
+      };
+      // Update shared globals so other parts of the engine stay in sync.
+      window.__mpbLastOpenOrderPayload = payload;
+      window.__mpbTradeWs = ws;
       console.log('[wsFinder] sendDirectTrade: sent pair=' + pair +
-        ' amount=' + amt);
-      return {ok: true, ws: ws, payload: payload};
+        ' amount=' + amt + ' requestId=' + requestId);
+      return {ok: true, ws: ws, payload: payload, requestId: requestId, url: ws.url || ''};
     } catch (err) {
       console.error('[wsFinder] sendDirectTrade error:', err);
       return {ok: false, reason: (err && err.message) || String(err)};
@@ -187,6 +199,14 @@
     _MonitorWS.CLOSED     = 3;
     _MonitorWS.__wsFinderMonitor = true;
     try { window.WebSocket = _MonitorWS; } catch (_) {}
+  })();
+
+  // Auto-wrap any sockets already present in __mpbWsPool and __mpbTradeWs so
+  // sendDirectTrade can use oldSend immediately without waiting for new traffic.
+  (function _wrapExisting() {
+    var pool = window.__mpbWsPool || [];
+    for (var i = 0; i < pool.length; i++) wrapSocket(pool[i]);
+    if (window.__mpbTradeWs) wrapSocket(window.__mpbTradeWs);
   })();
 
   // Support CommonJS environments (unit tests, Node tooling).
