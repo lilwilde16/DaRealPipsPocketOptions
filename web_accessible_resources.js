@@ -175,7 +175,9 @@ function _mpbExecTrade(eng, ws) {
   // Craft a minimal openOrder base message and call ws.send() so the hook intercepts it,
   // pops our deal from futureDeals, and sends the correctly-formed order.
   var baseMsg = _mpbBuildOpenOrderPayload(pair);
-  _mpbSafeWsSend(ws, baseMsg, pair).catch(function(err) {
+  _mpbSafeWsSend(ws, baseMsg, pair).then(function() {
+    window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
+  }).catch(function(err) {
     // Clean up: only remove the specific deal we pushed if it is still in the queue
     var pending = eng.userInfo.futureDeals[dealIdx];
     if (pending && pending.pair === pair && pending.dur === 'call' && pending.sum === 1) {
@@ -1353,7 +1355,15 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
   function read(k, d){ try{ var v = JSON.parse(localStorage.getItem(k)); return (v===null||v===undefined)?d:v; }catch(e){return d;} }
 
   function isDemo(){
-    // Check the userInfo via a postMessage round-trip is async; use DOM heuristics instead.
+    // Check engine userInfo first — updated from platform balance WebSocket message, most reliable.
+    // The engine initializes with isDemo:true and the typeof guard ensures we only read it
+    // once the engine has set an explicit boolean (it is always a boolean from engine init).
+    // Note: even if stale, isDemo:1 is always in the trade payload so real-money risk is zero.
+    if (window.__mpbEngine && window.__mpbEngine.userInfo &&
+        typeof window.__mpbEngine.userInfo.isDemo === 'boolean') {
+      return window.__mpbEngine.userInfo.isDemo;
+    }
+    // DOM fallback for when engine hasn't yet received a balance update.
     // PocketOption shows a "Demo" badge or balance label when in demo mode.
     var txt = (document.body||document.documentElement).innerText||'';
     // Look for explicit demo indicators
@@ -1382,8 +1392,15 @@ window.addEventListener('mpb-remount', function(){ try{ mountAll(); }catch(e){} 
     var pairsOk = Array.isArray(pairs) && pairs.length > 0;
     results.push({label:'Trading pairs selected', ok: pairsOk, msg: pairsOk ? (pairs.length + ' pair(s) active') : '⚠ NONE selected — bot will NOT trade'});
 
-    // 4. Data stream heartbeat
-    results.push({label:'Data stream', ok: _mpbStreamSeen, msg: _mpbStreamSeen ? 'Stream activity detected' : 'No stream data yet (bot may not have started)'});
+    // 4. Data stream heartbeat:
+    //    _mpbStreamSeen → set when a newDeal postMessage fires (trade signal from engine).
+    //    engine.rates check → set as soon as any WS market-data frame arrives and checkRate() runs;
+    //    this allows the check to pass even before a trade signal is generated.
+    var streamOk = _mpbStreamSeen || !!(
+      window.__mpbEngine && window.__mpbEngine.rates &&
+      Object.keys(window.__mpbEngine.rates).length > 0
+    );
+    results.push({label:'Data stream', ok: streamOk, msg: streamOk ? 'Stream activity detected' : 'No stream data yet (bot may not have started)'});
 
     // 5. Required DOM nodes
     var hasModal = !!document.getElementById('sub-menu-robot-modal');
