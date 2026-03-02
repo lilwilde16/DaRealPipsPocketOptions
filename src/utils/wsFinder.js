@@ -99,7 +99,38 @@
     return url.indexOf('digital') !== -1 ? 'digital' : 'binary';
   }
 
-  function _buildPayload(pair, amount) {
+  /**
+   * _generateRequestId — generates a unique large numeric request ID.
+   * Uses a monotonic counter combined with timestamp to guarantee uniqueness
+   * even across multiple calls within the same millisecond.
+   * @returns {number}
+   */
+  var _requestIdCounter = 0;
+  function _generateRequestId() {
+    _requestIdCounter = (_requestIdCounter + 1) % 1000000;
+    return (Date.now() % 1000000000) * 1000 + _requestIdCounter;
+  }
+
+  /**
+   * _detectOptionTypeNumeric — reads option_type from the last captured openOrder
+   * payload.  Falls back to 100 (binary) when absent or unreadable.
+   * @returns {number}
+   */
+  function _detectOptionTypeNumeric() {
+    var last = window.__mpbLastOpenOrderPayload;
+    if (typeof last === 'string' && last.length > 4) {
+      try {
+        var parsed = JSON.parse(last.slice(2));
+        if (Array.isArray(parsed) && parsed[1] && parsed[1].option_type) {
+          return parsed[1].option_type;
+        }
+      } catch (_) {}
+    }
+    return 100; // default: binary option
+  }
+
+  function _buildPayload(pair, amount, requestId) {
+    var optionType = _detectOptionTypeNumeric();
     var last = window.__mpbLastOpenOrderPayload;
     if (typeof last === 'string' && last.length > 4 &&
         last[0] === '4' && last[1] === '2') {
@@ -111,14 +142,15 @@
           parsed[1].amount = amount;
           parsed[1].isDemo = 1;
           if (!parsed[1].time) parsed[1].time = 60;
+          if (requestId !== undefined) parsed[1].requestId = requestId;
           return '42' + JSON.stringify(parsed);
         }
       } catch (_) {}
     }
-    return '42' + JSON.stringify([
-      'openOrder',
-      {asset: pair, action: 'call', amount: amount, isDemo: 1, time: 60}
-    ]);
+    var frame = {asset: pair, action: 'call', amount: amount, isDemo: 1,
+                 time: 60, option_type: optionType};
+    if (requestId !== undefined) frame.requestId = requestId;
+    return '42' + JSON.stringify(['openOrder', frame]);
   }
 
   /**
@@ -128,7 +160,8 @@
    * Keeps isDemo:1 so it is always a demo trade.
    * @param {string} pair    Asset pair, e.g. 'EURUSD_otc'
    * @param {number} [amount=1]  Trade amount in USD
-   * @returns {{ok: boolean, reason?: string, ws?: WebSocket, payload?: string}}
+   * @returns {{ok: boolean, reason?: string, ws?: WebSocket, payload?: string,
+   *            requestId?: number, url?: string}}
    */
   function sendDirectTrade(pair, amount) {
     var ws = pickLiveSocket();
@@ -142,16 +175,32 @@
       return {ok: false, reason: 'socket not OPEN', readyState: ws.readyState};
     }
     var amt = (amount !== null && amount !== undefined) ? amount : 1;
-    var payload = _buildPayload(pair, amt);
+    var requestId = _generateRequestId();
+    var payload = _buildPayload(pair, amt, requestId);
     try {
       // Prefer oldSend to bypass the engine's deal-queue interceptor.
-      // oldSend still routes through prototype monitoring hooks so
-      // __mpbTradeWs / __mpbLastOpenOrderPayload are updated as expected.
       var sendFn = ws.oldSend || ws.send;
       sendFn.call(ws, payload);
+      // Update shared globals so the rest of the engine sees this send.
+      window.__mpbTradeWs = ws;
+      window.__mpbLastOpenOrderPayload = payload;
+      // Maintain requestId → trade mapping for server-ack correlation.
+      window.__mpbPendingByRequestId = window.__mpbPendingByRequestId || {};
+      window.__mpbPendingByRequestId[requestId] = {
+        pair: pair, amount: amt, timestamp: Date.now()
+      };
+      // Clean up stale pending entries (> 5 minutes old) to prevent memory leaks.
+      var _staleThreshold = Date.now() - 300000;
+      var _pending = window.__mpbPendingByRequestId;
+      for (var _k in _pending) {
+        if (Object.prototype.hasOwnProperty.call(_pending, _k) &&
+            _pending[_k].timestamp < _staleThreshold) {
+          delete _pending[_k];
+        }
+      }
       console.log('[wsFinder] sendDirectTrade: sent pair=' + pair +
-        ' amount=' + amt);
-      return {ok: true, ws: ws, payload: payload};
+        ' amount=' + amt + ' requestId=' + requestId);
+      return {ok: true, ws: ws, payload: payload, requestId: requestId, url: ws.url || ''};
     } catch (err) {
       console.error('[wsFinder] sendDirectTrade error:', err);
       return {ok: false, reason: (err && err.message) || String(err)};
