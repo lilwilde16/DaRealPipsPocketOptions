@@ -44,8 +44,7 @@
       var _data = evt.data;
       if (_data instanceof ArrayBuffer && eng.action) {
         try {
-          var _bytes = new Uint8Array(_data);
-          var _a = JSON.parse(String.fromCharCode.apply(null, _bytes));
+          var _a = JSON.parse(new TextDecoder().decode(_data));
           eng.update(_a);
         } catch (_) {}
       } else if (typeof _data === 'string' && _data.length > 6) {
