@@ -28,6 +28,13 @@
   wf.onload = function () { try { this.remove(); } catch (e) {} };
   (document.head || document.documentElement).appendChild(wf);
 
+  // Inject autoTrader module so window.__mpbAutoTrader is available for the
+  // main engine and any downstream UI/autotrader code.
+  const at = document.createElement('script');
+  at.src = chrome.runtime.getURL('src/autoTrader.js');
+  at.onload = function () { try { this.remove(); } catch (e) {} };
+  (document.head || document.documentElement).appendChild(at);
+
   // Create and inject the main bot script
   const s = document.createElement("script");
   s.src = chrome.runtime.getURL("web_accessible_resources.js");
