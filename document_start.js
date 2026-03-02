@@ -21,6 +21,13 @@
   // Also set a DOM attribute so page-context code can detect injection across isolated worlds
   document.documentElement.dataset.mpbEngineInjected = '1';
 
+  // Inject wsFinder utility into page context before the main bot script so
+  // window.__wsFinder is available when the engine's event handlers fire.
+  const wf = document.createElement('script');
+  wf.src = chrome.runtime.getURL('src/utils/wsFinder.js');
+  wf.onload = function () { try { this.remove(); } catch (e) {} };
+  (document.head || document.documentElement).appendChild(wf);
+
   // Create and inject the main bot script
   const s = document.createElement("script");
   s.src = chrome.runtime.getURL("web_accessible_resources.js");
