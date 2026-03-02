@@ -50,7 +50,7 @@
     var results = [];
     function _add(ws) {
       if (ws && typeof ws.send === 'function' &&
-          ws.readyState !== WebSocket.CLOSED &&
+          ws.readyState !== 3 /* CLOSED */ &&
           seen.indexOf(ws) === -1) {
         seen.push(ws);
         results.push(ws);
@@ -75,13 +75,13 @@
     var candidates = collectCandidates();
     // Prefer OPEN + oldSend (engine-wrapped sockets that support direct bypass)
     for (var i = 0; i < candidates.length; i++) {
-      if (candidates[i].readyState === WebSocket.OPEN && candidates[i].oldSend) {
+      if (candidates[i].readyState === 1 /* OPEN */ && candidates[i].oldSend) {
         return candidates[i];
       }
     }
     // Any OPEN socket
     for (var j = 0; j < candidates.length; j++) {
-      if (candidates[j].readyState === WebSocket.OPEN) {
+      if (candidates[j].readyState === 1 /* OPEN */) {
         return candidates[j];
       }
     }
@@ -136,7 +136,7 @@
       console.warn('[wsFinder] sendDirectTrade: no live socket found');
       return {ok: false, reason: 'no live socket'};
     }
-    if (ws.readyState !== WebSocket.OPEN) {
+    if (ws.readyState !== 1 /* OPEN */) {
       console.warn('[wsFinder] sendDirectTrade: socket not OPEN (readyState=' +
         ws.readyState + ')');
       return {ok: false, reason: 'socket not OPEN', readyState: ws.readyState};
@@ -166,6 +166,28 @@
     detectOptionType:  detectOptionType,
     sendDirectTrade:   sendDirectTrade
   };
+
+  // Persistent constructor monitor — intercepts future WebSocket instances so
+  // they are wrapped and tracked in __mpbDetectedTradeSockets.  Runs after the
+  // engine's own constructor override, so it wraps the engine-wrapped version.
+  // Marks itself with __wsFinderMonitor to avoid installing twice.
+  (function _installConstructorMonitor() {
+    if (!window.WebSocket || window.WebSocket.__wsFinderMonitor) return;
+    var _PrevWS = window.WebSocket;
+    function _MonitorWS(url, protocols) {
+      var ws = protocols ? new _PrevWS(url, protocols) : new _PrevWS(url);
+      wrapSocket(ws);
+      return ws;
+    }
+    // Preserve static properties (CONNECTING/OPEN/CLOSING/CLOSED = 0/1/2/3).
+    _MonitorWS.prototype = _PrevWS.prototype;
+    _MonitorWS.CONNECTING = 0;
+    _MonitorWS.OPEN       = 1;
+    _MonitorWS.CLOSING    = 2;
+    _MonitorWS.CLOSED     = 3;
+    _MonitorWS.__wsFinderMonitor = true;
+    try { window.WebSocket = _MonitorWS; } catch (_) {}
+  })();
 
   // Support CommonJS environments (unit tests, Node tooling).
   if (typeof module !== 'undefined' && module.exports) {
