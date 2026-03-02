@@ -155,8 +155,17 @@ function _mpbExecTrade(eng, ws) {
   var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
     ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
   eng.checkRate(pair);
-  // Try wsFinder direct send first — uses the verified working direct-send pattern
-  // that bypasses timing-sensitive polling and socket-rotation failures.
+  // Use the autoTrader module so the test exercises the same code path as real trading.
+  if (window.__mpbAutoTrader && typeof window.__mpbAutoTrader.sendOrder === 'function') {
+    var res = window.__mpbAutoTrader.sendOrder(pair, 'call', 1);
+    console.log('[MPB] test-trade via autoTrader', res);
+    if (res.ok) {
+      eng.userInfo.openedDials++;
+      window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + pair + ')'}, window.location.href);
+      return;
+    }
+  }
+  // Fallback: try wsFinder direct send.
   if (window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
     var res = window.__wsFinder.sendDirectTrade(pair, 1);
     console.log('[MPB] test-trade via wsFinder', res);
@@ -166,7 +175,7 @@ function _mpbExecTrade(eng, ws) {
       return;
     }
   }
-  // Push a single demo deal to the queue: CALL direction, $1 amount, 1-minute expiry
+  // Last-resort fallback: queue-based approach via engine send interceptor.
   var dealIdx = eng.userInfo.futureDeals.length;
   eng.userInfo.futureDeals.push({pair: pair, dur: 'call', sum: 1});
   var wasStarted = eng.settings.started;
@@ -205,15 +214,16 @@ window.addEventListener('message', function(ev) {
   }
   var ws = _mpbResolveTradeWs();
   if (!ws || typeof ws.send !== 'function') {
-    // Try wsFinder before starting the 8s poll — handles socket-rotation cases
-    // where __mpbTradeWs has rotated but wsFinder can still find a live socket.
-    if (window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
-      var _wsfPair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
+    // Try autoTrader before starting the 8s poll — uses the same send path as real trading.
+    if (window.__mpbAutoTrader && typeof window.__mpbAutoTrader.sendOrder === 'function') {
+      var _atPair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
         ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
-      var _wsfRes = window.__wsFinder.sendDirectTrade(_wsfPair, 1);
-      console.log('[MPB] test-trade via wsFinder (no captured ws)', _wsfRes);
-      if (_wsfRes.ok) {
-        window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + _wsfPair + ')'}, window.location.href);
+      eng.checkRate(_atPair);
+      var _atRes = window.__mpbAutoTrader.sendOrder(_atPair, 'call', 1);
+      console.log('[MPB] test-trade via autoTrader (no captured ws)', _atRes);
+      if (_atRes.ok) {
+        eng.userInfo.openedDials++;
+        window.postMessage({belobot: true, info_text: '✅ Demo test trade sent ($1 ' + _atPair + ')'}, window.location.href);
         return;
       }
     }
@@ -243,10 +253,11 @@ window.addEventListener('message', function(ev) {
 // === MPB: Demo martingale test handler ===
 // Handles mpb_demo_martingale_test: runs two demo trades in sequence.
 // After the first trade, simulates a close outcome after a short delay.
-// If the first trade is a loss (default), the second doubles the amount (martingale).
-// If the first trade is a win, the second keeps the same amount.
+// If the first trade is a loss (default), the second doubles the amount via
+// the autoTrader martingale logic.  If the first trade is a win, the state
+// resets and the second keeps the same base amount.
 // Set window.__mpbSimulateMartingaleWin = true before triggering to test the win path.
-// All trades are demo-only (isDemo:1) and use sendDirectTrade.
+// All trades are demo-only (isDemo:1) and use autoTrader.sendOrder().
 window.addEventListener('message', function(ev) {
   var d = ev.data || {};
   if (!d.belobot || d.act !== 'mpb_demo_martingale_test') return;
@@ -261,17 +272,20 @@ window.addEventListener('message', function(ev) {
     window.postMessage({belobot: true, info_text: '⛔ Martingale test blocked — switch to demo account first.'}, window.location.href);
     return;
   }
-  if (!window.__wsFinder || typeof window.__wsFinder.sendDirectTrade !== 'function') {
-    window.postMessage({belobot: true, info_text: '⚠ wsFinder not available — reload and try again.'}, window.location.href);
+  if (!window.__mpbAutoTrader || typeof window.__mpbAutoTrader.sendOrder !== 'function') {
+    window.postMessage({belobot: true, info_text: '⚠ AutoTrader not available — reload and try again.'}, window.location.href);
     return;
   }
   var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
     ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
   var firstAmount = d.amount || 1;
 
-  // Send first trade.
+  // Reset any stale martingale state for this pair so the test always starts clean.
+  window.__mpbAutoTrader.resetMartingale(pair);
+
+  // Send first trade via autoTrader (same path real trading uses).
   eng.checkRate(pair);
-  var r1 = window.__wsFinder.sendDirectTrade(pair, firstAmount);
+  var r1 = window.__mpbAutoTrader.sendOrder(pair, 'call', firstAmount);
   console.log('[MPB] martingale test: trade 1', r1);
   if (!r1.ok) {
     window.postMessage({belobot: true, info_text: '⚠ Martingale test: first trade failed — ' + (r1.reason || 'unknown error')}, window.location.href);
@@ -285,16 +299,21 @@ window.addEventListener('message', function(ev) {
   var simDelay = (typeof window.__mpbMartingaleSimDelayMs === 'number') ? window.__mpbMartingaleSimDelayMs : 3000;
   setTimeout(function() {
     var firstWin = !!window.__mpbSimulateMartingaleWin;
-    var secondAmount = firstWin
-      ? Math.floor(firstAmount * 100) / 100
-      : Math.floor(firstAmount * 2 * 100) / 100;
+    // Run the outcome through autoTrader so martingale state is updated exactly
+    // as it would be during real trading.
+    var simulatedProfit = firstWin ? firstAmount : -firstAmount;
+    window.__mpbAutoTrader.onTradeClose(pair, simulatedProfit, firstAmount);
+
+    // Use autoTrader to determine the correct second-trade amount.
+    var secondAmount = window.__mpbAutoTrader.getMartingaleAmount(pair, firstAmount);
     var outcomeLabel = firstWin ? '✅ win (simulated)' : '❌ loss (simulated)';
     console.log('[MPB] martingale test: trade 1 outcome:', outcomeLabel,
-      '— trade 2 amount:', secondAmount);
+      '— trade 2 amount:', secondAmount,
+      '— martinState:', JSON.stringify(window.__mpbAutoTrader.getMartingaleState(pair)));
 
-    // Send second trade.
+    // Send second trade via autoTrader.
     eng.checkRate(pair);
-    var r2 = window.__wsFinder.sendDirectTrade(pair, secondAmount);
+    var r2 = window.__mpbAutoTrader.sendOrder(pair, 'call', secondAmount);
     console.log('[MPB] martingale test: trade 2', r2);
     if (!r2.ok) {
       window.postMessage({belobot: true, info_text: '⚠ Martingale test: trade 2 failed — ' + (r2.reason || 'unknown error')}, window.location.href);
@@ -302,8 +321,8 @@ window.addEventListener('message', function(ev) {
     }
     eng.userInfo.openedDials++;
     var label = firstWin
-      ? '✅ Martingale test done: T1 win → T2 $' + secondAmount + ' (same)'
-      : '✅ Martingale test done: T1 loss → T2 $' + secondAmount + ' (doubled)';
+      ? '✅ Martingale test done: T1 win → T2 $' + secondAmount + ' (same, state reset)'
+      : '✅ Martingale test done: T1 loss → T2 $' + secondAmount + ' (doubled via autoTrader)';
     window.postMessage({belobot: true, info_text: label}, window.location.href);
   }, simDelay);
 });
