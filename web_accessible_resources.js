@@ -61,7 +61,7 @@ function _mpbWaitForWsOpen(ws, timeoutMs) {
 
 /**
  * _mpbSafeWsSend – waits for WS to be OPEN then sends; surfaces any send error.
- * Only logs "[MPB] demo test trade sent" after a confirmed successful send.
+ * Only logs after a confirmed successful send.
  * @param {WebSocket} ws
  * @param {string} payload
  * @param {string} pair  Used for logging.
@@ -70,8 +70,8 @@ function _mpbWaitForWsOpen(ws, timeoutMs) {
 function _mpbSafeWsSend(ws, payload, pair) {
   return _mpbWaitForWsOpen(ws, 5000).then(function(openWs) {
     openWs.send(payload);
-    console.log('[MPB] demo test trade sent for pair:', pair);
-    if (window.__mpbDebug) { _mpbLogNextMessage(openWs, 'demo-trade-ack'); }
+    console.log('[MPB] test trade sent for pair:', pair);
+    if (window.__mpbDebug) { _mpbLogNextMessage(openWs, 'trade-ack'); }
   });
 }
 
@@ -149,42 +149,110 @@ function _mpbGetTradeRouteLabel() {
 
 // === MPB: Trade executor — sends a test order on the current account (demo or real) ===
 // Uses autoTrader.sendOrder() which respects the engine's isDemo flag.
+
+/**
+ * Pick the best pair for a test trade.
+ * Priority: first selected pair → any pair from eng.rates → sensible default.
+ */
+function _mpbPickTestPair(eng) {
+  if (eng.settings.selected_pairs && eng.settings.selected_pairs.length) {
+    return eng.settings.selected_pairs[0];
+  }
+  // Use any pair the engine has seen market data for.
+  if (eng.rates) {
+    var onDemo = !!(eng.userInfo && eng.userInfo.isDemo);
+    var rateKeys = Object.keys(eng.rates);
+    // Prefer OTC on demo, live on real — matches typical usage.
+    for (var ki = 0; ki < rateKeys.length; ki++) {
+      var kk = rateKeys[ki];
+      if (onDemo && kk.slice(-3) === 'otc') return kk;
+      if (!onDemo && kk.slice(-3) !== 'otc') return kk;
+    }
+    if (rateKeys.length) return rateKeys[0];
+  }
+  return (eng.userInfo && eng.userInfo.isDemo) ? 'EURUSD_otc' : 'EURUSD';
+}
+
+/**
+ * Register a one-shot WebSocket message listener that watches for a
+ * `successopenOrder` response from Pocket Option's server.
+ * - Shows a "🎯 Trade CONFIRMED" toast when the server acks the order.
+ * - Shows a console warning (no UI noise) when no ack arrives within the timeout.
+ * Call this immediately after dispatching a test trade via PATH B.
+ */
+function _mpbListenForTradeAck() {
+  var TRADE_ACK_TIMEOUT_MS = 8000;
+  var ackWs = (window.__wsFinder && typeof window.__wsFinder.pickLiveSocket === 'function')
+    ? window.__wsFinder.pickLiveSocket()
+    : (window.__mpbTradeWs || window.__mpbWs);
+  if (!ackWs) return;
+  var _done = false;
+  var _timer;
+  // Define _handler before _cleanup so _cleanup's removeEventListener reference is clear.
+  function _handler(evt) {
+    if (_done) return;
+    if (typeof evt.data !== 'string' || evt.data.indexOf('successopenOrder') === -1) return;
+    // Validate by parsing the Socket.IO frame the same way the engine does.
+    try {
+      var parsed = JSON.parse(evt.data.slice(4));
+      if (!Array.isArray(parsed) || parsed[0] !== 'successopenOrder') return;
+    } catch (_) { return; }
+    _cleanup();
+    clearTimeout(_timer);
+    console.log('[MPB] trade confirmed by server:', evt.data.substring(0, 120));
+    window.postMessage({belobot: true, info_text: '🎯 Trade CONFIRMED by server — check open trades!'}, window.location.href);
+  }
+  function _cleanup() { _done = true; ackWs.removeEventListener('message', _handler); }
+  ackWs.addEventListener('message', _handler);
+  _timer = setTimeout(function() {
+    if (!_done) {
+      _cleanup();
+      console.warn('[MPB] trade ack: no successopenOrder within ' + (TRADE_ACK_TIMEOUT_MS / 1000) + ' s — trade may not have executed on server');
+    }
+  }, TRADE_ACK_TIMEOUT_MS);
+}
+
 function _mpbExecTrade(eng, ws) {
   var accountLabel = eng.userInfo.isDemo ? 'demo' : 'REAL';
-  var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
-    ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
+  var pair = _mpbPickTestPair(eng);
   eng.checkRate(pair);
-  // Use the autoTrader module so the test exercises the same code path as real trading.
+  // PATH B — direct WebSocket send via oldSend, bypassing the engine queue.
+  // This is the most reliable path and the one that matches real trading.
   if (window.__mpbAutoTrader && typeof window.__mpbAutoTrader.sendOrder === 'function') {
     var res = window.__mpbAutoTrader.sendOrder(pair, 'call', 1);
     console.log('[MPB] test-trade via autoTrader', res);
     if (res.ok) {
       eng.userInfo.openedDials++;
-      window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + ']'}, window.location.href);
+      _mpbListenForTradeAck();
+      window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + '] — awaiting server ack…'}, window.location.href);
       return;
     }
   }
-  // Fallback: try wsFinder direct send.
+  // Fallback PATH B — try wsFinder direct send.
   if (window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
     var res = window.__wsFinder.sendDirectTrade(pair, 1);
     console.log('[MPB] test-trade via wsFinder', res);
     if (res.ok) {
       eng.userInfo.openedDials++;
-      window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + ']'}, window.location.href);
+      _mpbListenForTradeAck();
+      window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + '] — awaiting server ack…'}, window.location.href);
       return;
     }
   }
-  // Last-resort fallback: queue-based approach via engine send interceptor.
+  // Last-resort PATH A — queue-based approach via engine send interceptor.
+  // NOTE: On accounts where onlyDemo=true (unlicensed), the engine interceptor
+  // may force isDemo=1 regardless of account type.
   var dealIdx = eng.userInfo.futureDeals.length;
   eng.userInfo.futureDeals.push({pair: pair, dur: 'call', sum: 1});
   var wasStarted = eng.settings.started;
   eng.settings.started = true;
-  console.log('[MPB] test trade enqueued for pair:', pair, '[' + accountLabel + '] — triggering send');
+  console.log('[MPB] test trade enqueued for pair:', pair, '[' + accountLabel + '] — triggering via interceptor');
   // Craft a minimal openOrder base message and call ws.send() so the hook intercepts it,
   // pops our deal from futureDeals, and sends the correctly-formed order.
   var baseMsg = _mpbBuildOpenOrderPayload(pair);
+  _mpbListenForTradeAck();
   _mpbSafeWsSend(ws, baseMsg, pair).then(function() {
-    window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + ']'}, window.location.href);
+    window.postMessage({belobot: true, info_text: '✅ Test trade sent ($1 ' + pair + ') [' + accountLabel + '] — awaiting server ack…'}, window.location.href);
   }).catch(function(err) {
     // Clean up: only remove the specific deal we pushed if it is still in the queue
     var pending = eng.userInfo.futureDeals[dealIdx];
@@ -272,8 +340,7 @@ window.addEventListener('message', function(ev) {
     window.postMessage({belobot: true, info_text: '⚠ AutoTrader not available — reload and try again.'}, window.location.href);
     return;
   }
-  var pair = (eng.settings.selected_pairs && eng.settings.selected_pairs.length)
-    ? eng.settings.selected_pairs[0] : 'EURUSD_otc';
+  var pair = _mpbPickTestPair(eng);
   var firstAmount = d.amount || 1;
   var accountLabel = eng.userInfo.isDemo ? 'demo' : 'REAL';
 
