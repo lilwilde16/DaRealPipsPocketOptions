@@ -9,7 +9,7 @@
     window.__mpbWsPool = window.__mpbWsPool || [];
     WebSocket.prototype.send = function mpbWsSend(data) {
       if (window.__mpbWsPool.indexOf(this) === -1) window.__mpbWsPool.push(this);
-      if (!window.__mpbWs && this.readyState !== WebSocket.CLOSED) {
+      if (!window.__mpbWs && this.readyState !== 3 /* CLOSED */) {
         console.log('[MPB] WebSocket captured via prototype hook');
         window.__mpbWs = this;
       }
@@ -43,14 +43,14 @@
 function _mpbWaitForWsOpen(ws, timeoutMs) {
   var stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
   return new Promise(function(resolve, reject) {
-    if (ws.readyState === WebSocket.OPEN) { resolve(ws); return; }
+    if (ws.readyState === 1 /* OPEN */) { resolve(ws); return; }
     var deadline = Date.now() + (timeoutMs || 5000);
     var id = setInterval(function() {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws.readyState === 1 /* OPEN */) {
         clearInterval(id); resolve(ws);
-      } else if (ws.readyState > WebSocket.OPEN) {
+      } else if (ws.readyState > 1 /* OPEN */) {
         clearInterval(id);
-        reject(new Error('WebSocket ' + (stateNames[ws.readyState] || ws.readyState) + ' — cannot send'));
+        reject(new Error('WebSocket ' + (stateNames[ws.readyState] || ws.readyState) + ' — not open, cannot send'));
       } else if (Date.now() >= deadline) {
         clearInterval(id);
         reject(new Error('WebSocket still ' + (stateNames[ws.readyState] || ws.readyState) + ' after ' + (timeoutMs || 5000) + 'ms timeout'));
@@ -138,7 +138,7 @@ function _mpbGetTradeRouteLabel() {
   if (!r) return 'No test-trade route captured yet.';
   var src = r.source || 'unknown';
   var payload = r.payload || 'unknown';
-  var state = (r.readyState === WebSocket.OPEN) ? 'OPEN' : String(r.readyState);
+  var state = (r.readyState === 1 /* OPEN */) ? 'OPEN' : String(r.readyState);
   return 'WS source: ' + src + ' · payload: ' + payload + ' · readyState: ' + state;
 }
 
@@ -258,7 +258,7 @@ window.addEventListener('message', function(ev) {
   // result in duplicate sends if multiple newDeal events fire in quick succession.
   // If not open, the deal stays in futureDeals and the next natural platform send
   // (intercepted by the engine's send hook) will execute it.
-  if (ws.readyState !== WebSocket.OPEN) {
+  if (ws.readyState !== 1 /* OPEN */) {
     console.warn('[MPB] auto-trade: WebSocket not open (readyState ' + ws.readyState + ') — deal queued for next platform send');
     return;
   }
