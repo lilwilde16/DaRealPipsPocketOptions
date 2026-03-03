@@ -225,20 +225,25 @@ function _mpbPickTestPair(eng) {
  * - Shows a "🎯 Trade CONFIRMED" toast when the server acks the order.
  * - Shows a console warning (no UI noise) when no ack arrives within the timeout.
  * Call this immediately after dispatching a test trade via PATH B.
+ * Listens on ALL candidate sockets so the ACK is caught regardless of which
+ * connection the server responds on.
  */
 function _mpbListenForTradeAck() {
-  var TRADE_ACK_TIMEOUT_MS = 8000;
-  var ackWs = (window.__wsFinder && typeof window.__wsFinder.pickLiveSocket === 'function')
-    ? window.__wsFinder.pickLiveSocket()
-    : (window.__mpbTradeWs || window.__mpbWs);
-  if (!ackWs) return;
+  var TRADE_ACK_TIMEOUT_MS = 10000;
+  // Collect all live sockets to maximise the chance of catching the ACK — Pocket
+  // Option may use separate WebSocket connections for trading vs. data streams.
+  var ackSockets = (window.__wsFinder && typeof window.__wsFinder.collectCandidates === 'function')
+    ? window.__wsFinder.collectCandidates()
+    : [window.__mpbTradeWs, window.__mpbWs].filter(Boolean);
+  if (!ackSockets.length) return;
   var _done = false;
   var _timer;
-  // Define _handler before _cleanup so _cleanup's removeEventListener reference is clear.
+  // _handler is defined before _cleanup so _cleanup's removeEventListener can reference it.
   function _handler(evt) {
     if (_done) return;
     if (typeof evt.data !== 'string' || evt.data.indexOf('successopenOrder') === -1) return;
     // Validate by parsing the Socket.IO frame the same way the engine does.
+    // Pocket Option server frames use a 4-character prefix before the JSON array.
     try {
       var parsed = JSON.parse(evt.data.slice(4));
       if (!Array.isArray(parsed) || parsed[0] !== 'successopenOrder') return;
@@ -248,8 +253,16 @@ function _mpbListenForTradeAck() {
     console.log('[MPB] trade confirmed by server:', evt.data.substring(0, 120));
     window.postMessage({belobot: true, info_text: '🎯 Trade CONFIRMED by server — check open trades!'}, window.location.href);
   }
-  function _cleanup() { _done = true; ackWs.removeEventListener('message', _handler); }
-  ackWs.addEventListener('message', _handler);
+  function _cleanup() {
+    if (_done) return;
+    _done = true;
+    for (var _i = 0; _i < ackSockets.length; _i++) {
+      try { ackSockets[_i].removeEventListener('message', _handler); } catch (_) {}
+    }
+  }
+  for (var _i = 0; _i < ackSockets.length; _i++) {
+    try { ackSockets[_i].addEventListener('message', _handler); } catch (_) {}
+  }
   _timer = setTimeout(function() {
     if (!_done) {
       _cleanup();

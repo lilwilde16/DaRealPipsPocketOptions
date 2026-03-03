@@ -137,7 +137,8 @@
     return 1; // safe default: demo when account type unknown
   }
 
-  function _buildPayload(pair, amount, requestId) {
+  function _buildPayload(pair, amount, requestId, direction) {
+    var dir = (direction === 'put') ? 'put' : 'call';
     var optionType = _detectOptionTypeNumeric();
     var isDemoFlag = _getIsDemoFlag();
     var last = window.__mpbLastOpenOrderPayload;
@@ -147,7 +148,7 @@
         var parsed = JSON.parse(last.slice(2));
         if (Array.isArray(parsed) && parsed[1] && typeof parsed[1] === 'object') {
           parsed[1].asset  = pair;
-          parsed[1].action = 'call';
+          parsed[1].action = dir;
           parsed[1].amount = amount;
           parsed[1].isDemo = isDemoFlag;
           if (!parsed[1].time) parsed[1].time = 60;
@@ -156,7 +157,7 @@
         }
       } catch (_) {}
     }
-    var frame = {asset: pair, action: 'call', amount: amount, isDemo: isDemoFlag,
+    var frame = {asset: pair, action: dir, amount: amount, isDemo: isDemoFlag,
                  time: 60, option_type: optionType};
     if (requestId !== undefined) frame.requestId = requestId;
     return '42' + JSON.stringify(['openOrder', frame]);
@@ -170,10 +171,11 @@
    * so the trade goes to the correct account — demo or real.
    * @param {string} pair    Asset pair, e.g. 'EURUSD_otc'
    * @param {number} [amount=1]  Trade amount in USD
+   * @param {'call'|'put'} [direction='call']  Trade direction
    * @returns {{ok: boolean, reason?: string, ws?: WebSocket, payload?: string,
    *            requestId?: number, url?: string}}
    */
-  function sendDirectTrade(pair, amount) {
+  function sendDirectTrade(pair, amount, direction) {
     var ws = pickLiveSocket();
     if (!ws) {
       console.warn('[wsFinder] sendDirectTrade: no live socket found');
@@ -185,8 +187,9 @@
       return {ok: false, reason: 'socket not OPEN', readyState: ws.readyState};
     }
     var amt = (amount !== null && amount !== undefined) ? amount : 1;
+    var dir = (direction === 'put') ? 'put' : 'call';
     var requestId = _generateRequestId();
-    var payload = _buildPayload(pair, amt, requestId);
+    var payload = _buildPayload(pair, amt, requestId, dir);
     try {
       // Prefer oldSend to bypass the engine's deal-queue interceptor.
       var sendFn = ws.oldSend || ws.send;
@@ -197,7 +200,7 @@
       // Maintain requestId → trade mapping for server-ack correlation.
       window.__mpbPendingByRequestId = window.__mpbPendingByRequestId || {};
       window.__mpbPendingByRequestId[requestId] = {
-        pair: pair, amount: amt, timestamp: Date.now()
+        pair: pair, amount: amt, direction: dir, timestamp: Date.now()
       };
       // Clean up stale pending entries (> 5 minutes old) to prevent memory leaks.
       var _staleThreshold = Date.now() - 300000;
@@ -209,7 +212,7 @@
         }
       }
       console.log('[wsFinder] sendDirectTrade: sent pair=' + pair +
-        ' amount=' + amt + ' requestId=' + requestId);
+        ' amount=' + amt + ' direction=' + dir + ' requestId=' + requestId);
       return {ok: true, ws: ws, payload: payload, requestId: requestId, url: ws.url || ''};
     } catch (err) {
       console.error('[wsFinder] sendDirectTrade error:', err);

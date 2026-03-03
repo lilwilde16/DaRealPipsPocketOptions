@@ -33,7 +33,7 @@
  *      rather than waiting for the next organic platform message.
  *
  * PATH B — Direct send via wsFinder (used by test trades and this module)
- *   `window.__wsFinder.sendDirectTrade(pair, amount)` builds a complete
+ *   `window.__wsFinder.sendDirectTrade(pair, amount, direction)` builds a complete
  *   openOrder frame using the last captured payload as a template, updates
  *   asset / action / amount, and sends via `ws.oldSend` to bypass the
  *   interceptor's deal-queue logic entirely.  All test/manual trades go
@@ -277,10 +277,6 @@
    *   - Manual/test trades
    *   - Autotrader-initiated trades where you want immediate execution
    *
-   * Note: wsFinder's sendDirectTrade always sends as 'call'.  When direction
-   * is 'put', this function uses the fallback path which builds the frame
-   * manually so the correct direction is preserved.
-   *
    * @param {string}  pair       Asset symbol, e.g. 'EURUSD_otc'
    * @param {'call'|'put'|'up'|'down'} direction
    * @param {number}  [amount=1] Trade amount in USD
@@ -292,13 +288,12 @@
     var dir = _normalizeDirection(direction);
     var amt = (amount !== undefined && amount !== null) ? amount : 1;
 
-    // Delegate 'call' trades to wsFinder when available — it has the most
-    // robust socket selection and request-ID tracking logic.  'put' trades
-    // skip wsFinder because its sendDirectTrade always sends 'call'.
-    if (dir === 'call' &&
-        window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
-      // wsFinder now respects engine account type (isDemo flag from engine.userInfo.isDemo).
-      var res = window.__wsFinder.sendDirectTrade(pair, amt);
+    // Delegate to wsFinder when available — it has the most robust socket
+    // selection and request-ID tracking logic.
+    if (window.__wsFinder && typeof window.__wsFinder.sendDirectTrade === 'function') {
+      // wsFinder now supports direction ('call' or 'put') and respects the
+      // engine account type (isDemo flag from engine.userInfo.isDemo).
+      var res = window.__wsFinder.sendDirectTrade(pair, amt, dir);
       if (!res.ok) {
         console.warn('[AutoTrader] sendOrder via wsFinder failed:', res.reason);
       }
