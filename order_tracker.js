@@ -58,8 +58,18 @@
   }
 
   market.on('order.open', function onOrderOpen(openData) {
-    var pending = pendingQueue.length ? pendingQueue.shift() : null;
+    if (!openData || typeof openData.id === 'undefined' || openData.id === null || openData.id === '') {
+      emit('order.open.ignored', { reason: 'missing-id', raw: openData || null });
+      return;
+    }
+
     var key = String(openData.id);
+    if (openOrders[key]) {
+      emit('order.open.ignored', { reason: 'duplicate-id', id: openData.id, raw: openData || null });
+      return;
+    }
+
+    var pending = pendingQueue.length ? pendingQueue.shift() : null;
 
     openOrders[key] = {
       id: openData.id,

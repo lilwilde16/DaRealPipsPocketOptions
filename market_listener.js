@@ -70,8 +70,13 @@
       body = body.order;
     }
 
+    var id = body.id || body.order_id || body.deal_id;
+    if (typeof id === 'undefined' || id === null || id === '') {
+      return null;
+    }
+
     return {
-      id: body.id || body.order_id || body.deal_id,
+      id: id,
       amount: Number(body.amount || body.sum || body.stake || body.value),
       asset: body.asset || body.pair || body.symbol || body.instrument,
       raw: body
@@ -120,15 +125,20 @@
         profit = Number(deal.close_profit);
       }
 
+      var id = deal.id || deal.order_id || deal.deal_id;
+      if (typeof id === 'undefined' || id === null || id === '') {
+        return null;
+      }
+
       return {
-        id: deal.id || deal.order_id || deal.deal_id,
+        id: id,
         amount: Number(deal.amount || deal.sum || deal.stake || deal.value),
         profit: isFinite(profit) ? profit : 0,
         command: typeof deal.command !== 'undefined' ? deal.command : deal.action,
         asset: deal.asset || deal.pair || deal.symbol || deal.instrument,
         raw: deal
       };
-    });
+    }).filter(function onlyValid(item) { return !!item; });
   }
 
   function classify(serverEvent) {
