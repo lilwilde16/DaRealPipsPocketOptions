@@ -96,6 +96,13 @@
         "src/utils/wsFinder.js",
         "src/autoTrader.js",
         "web_accessible_resources.js",
+        "websocket_bridge.js",
+        "market_listener.js",
+        "trade_queue.js",
+        "execution_engine.js",
+        "order_tracker.js",
+        "ui_bridge.js",
+        "trader_runtime.js",
         "icon/*"
       ],
       "matches": [
