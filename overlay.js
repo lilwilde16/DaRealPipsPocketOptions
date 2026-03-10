@@ -1256,3 +1256,288 @@ function initMoneyPrinterUI() {
     bootWhenReady();
   }
 })();
+
+
+/* ================= MPB BACKTESTER TAB (IN-MODAL) ================= */
+(function MPBBacktesterTab() {
+  if (window.__MPB_BACKTESTER_TAB__) return;
+  window.__MPB_BACKTESTER_TAB__ = true;
+
+  var closesById = {};
+  var closes = [];
+
+  function post(act, extra) {
+    var payload = { belobot: true, act: act };
+    if (extra && typeof extra === 'object') {
+      for (var k in extra) payload[k] = extra[k];
+    }
+    window.postMessage(payload, window.location.href);
+  }
+
+  function strategyKey(tag) {
+    var txt = String(tag || 'unknown');
+    var ix = txt.indexOf('|m1:');
+    if (ix >= 0) {
+      txt = txt.slice(0, ix);
+    }
+    txt = txt.replace(/:s\d+$/i, '');
+    return txt || 'unknown';
+  }
+
+  function strategyStep(tag) {
+    var txt = String(tag || '');
+    var m = txt.match(/:s(\d+)$/i);
+    return m ? Number(m[1]) : 1;
+  }
+
+  function ingestClosedOrder(order) {
+    if (!order || typeof order !== 'object') return;
+    if (typeof order.id === 'undefined' || order.id === null || order.id === '') return;
+
+    var id = String(order.id);
+    var normalized = {
+      id: id,
+      profit: Number(order.profit) || 0,
+      amount: Number(order.amount) || 0,
+      strategyTag: String(order.strategyTag || 'unknown'),
+      strategy: strategyKey(order.strategyTag),
+      step: strategyStep(order.strategyTag),
+      closedAt: Number(order.closedAt) || Date.now()
+    };
+
+    closesById[id] = normalized;
+
+    closes = Object.keys(closesById).map(function mapToList(key) {
+      return closesById[key];
+    }).sort(function sortByClosedAt(a, b) {
+      return a.closedAt - b.closedAt;
+    });
+  }
+
+  function ingestClosedOrders(list) {
+    if (!Array.isArray(list)) return;
+    for (var i = 0; i < list.length; i++) {
+      ingestClosedOrder(list[i]);
+    }
+  }
+
+  function summarize(events) {
+    var total = events.length;
+    var wins = 0;
+    var losses = 0;
+    var pnl = 0;
+    var maxLossStreak = 0;
+    var streak = 0;
+    var realizedMaxStep = 1;
+
+    for (var i = 0; i < events.length; i++) {
+      var p = Number(events[i].profit) || 0;
+      pnl += p;
+      if (p > 0) {
+        wins += 1;
+        streak = 0;
+      } else {
+        losses += 1;
+        streak += 1;
+        if (streak > maxLossStreak) {
+          maxLossStreak = streak;
+        }
+      }
+      var step = Number(events[i].step) || 1;
+      if (step > realizedMaxStep) {
+        realizedMaxStep = step;
+      }
+    }
+
+    return {
+      total: total,
+      wins: wins,
+      losses: losses,
+      accuracy: total ? (wins / total) * 100 : 0,
+      pnl: pnl,
+      avgPnl: total ? pnl / total : 0,
+      maxLossStreak: maxLossStreak,
+      realizedMaxStep: realizedMaxStep
+    };
+  }
+
+  function simulateMartingale(events, baseAmount, multiplier, payoutPct, maxSteps) {
+    var step = 1;
+    var amount = baseAmount;
+    var maxDepth = 1;
+    var cycleStops = 0;
+    var simPnl = 0;
+    var payout = payoutPct / 100;
+
+    for (var i = 0; i < events.length; i++) {
+      var win = (Number(events[i].profit) || 0) > 0;
+      if (win) {
+        simPnl += amount * payout;
+        step = 1;
+        amount = baseAmount;
+      } else {
+        simPnl -= amount;
+        if (step < maxSteps) {
+          step += 1;
+          if (step > maxDepth) maxDepth = step;
+          amount = baseAmount * Math.pow(multiplier, step - 1);
+        } else {
+          cycleStops += 1;
+          step = 1;
+          amount = baseAmount;
+        }
+      }
+    }
+
+    return {
+      maxDepth: maxDepth,
+      cycleStops: cycleStops,
+      simPnl: simPnl
+    };
+  }
+
+  function render() {
+    var root = document.getElementById('mpb-bt-card');
+    if (!root) return;
+
+    var sel = document.getElementById('mpb-bt-strategy');
+    var stats = document.getElementById('mpb-bt-stats');
+    var rows = document.getElementById('mpb-bt-rows');
+    if (!sel || !stats || !rows) return;
+
+    var current = sel.value || 'all';
+    var seen = {};
+    for (var i = 0; i < closes.length; i++) {
+      seen[closes[i].strategy] = true;
+    }
+    var strategies = Object.keys(seen).sort();
+
+    sel.innerHTML = '<option value="all">All strategies</option>';
+    for (var s = 0; s < strategies.length; s++) {
+      var opt = document.createElement('option');
+      opt.value = strategies[s];
+      opt.textContent = strategies[s];
+      sel.appendChild(opt);
+    }
+    if (current && (current === 'all' || seen[current])) {
+      sel.value = current;
+    }
+
+    var strategy = sel.value || 'all';
+    var filtered = closes.filter(function filterByStrategy(item) {
+      return strategy === 'all' || item.strategy === strategy;
+    });
+
+    var summary = summarize(filtered);
+
+    var baseAmount = Math.max(0.35, Number(document.getElementById('mpb-bt-base').value) || 1);
+    var multiplier = Math.max(1.1, Number(document.getElementById('mpb-bt-multi').value) || 2);
+    var payoutPct = Math.max(1, Number(document.getElementById('mpb-bt-payout').value) || 92);
+    var maxSteps = Math.max(1, Math.floor(Number(document.getElementById('mpb-bt-steps').value) || 2));
+
+    var sim = simulateMartingale(filtered, baseAmount, multiplier, payoutPct, maxSteps);
+
+    stats.innerHTML =
+      '<div>Total: <b>' + summary.total + '</b> | Wins: <b>' + summary.wins + '</b> | Losses: <b>' + summary.losses + '</b></div>' +
+      '<div>Accuracy: <b>' + summary.accuracy.toFixed(2) + '%</b> | Real PnL: <b>' + (summary.pnl >= 0 ? '+' : '') + summary.pnl.toFixed(2) + '</b> | Avg: <b>' + (summary.avgPnl >= 0 ? '+' : '') + summary.avgPnl.toFixed(2) + '</b></div>' +
+      '<div>Max Loss Streak: <b>' + summary.maxLossStreak + '</b> | Realized M Step: <b>' + summary.realizedMaxStep + '</b></div>' +
+      '<div>Sim M Depth: <b>' + sim.maxDepth + '</b> | Sim Cycle Stops @ maxSteps: <b>' + sim.cycleStops + '</b> | Sim PnL: <b>' + (sim.simPnl >= 0 ? '+' : '') + sim.simPnl.toFixed(2) + '</b></div>';
+
+    var recent = filtered.slice(Math.max(0, filtered.length - 14)).reverse();
+    rows.innerHTML = '';
+    for (var r = 0; r < recent.length; r++) {
+      var row = document.createElement('div');
+      row.className = 'mpb-bt-row';
+      row.innerHTML =
+        '<span>' + new Date(recent[r].closedAt).toLocaleTimeString() + '</span>' +
+        '<span>' + recent[r].strategy + '</span>' +
+        '<span>S' + recent[r].step + '</span>' +
+        '<span>' + (recent[r].profit >= 0 ? '+' : '') + recent[r].profit.toFixed(2) + '</span>';
+      rows.appendChild(row);
+    }
+  }
+
+  function ensureUI() {
+    var modal = document.getElementById('sub-menu-robot-modal');
+    if (!modal) return;
+
+    if (!document.getElementById('mpb-bt-style')) {
+      var style = document.createElement('style');
+      style.id = 'mpb-bt-style';
+      style.textContent = '' +
+        '#mpb-bt-card{margin:10px 16px 12px;padding:10px;border:1px solid rgba(125,170,230,.35);border-radius:10px;background:rgba(9,16,30,.82);}' +
+        '#mpb-bt-title{font-size:12px;font-weight:700;letter-spacing:.2px;color:#9ec3ff;margin-bottom:8px;}' +
+        '#mpb-bt-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}' +
+        '#mpb-bt-grid input,#mpb-bt-grid select{width:100%;background:#0f1b33;border:1px solid rgba(125,170,230,.35);border-radius:8px;color:#eef4ff;padding:6px;font-size:11px;}' +
+        '#mpb-bt-stats{font-size:11px;line-height:1.4;color:#d7e6ff;margin:6px 0 8px;}' +
+        '#mpb-bt-stats b{color:#ffffff;}' +
+        '#mpb-bt-rows{max-height:130px;overflow:auto;border:1px solid rgba(125,170,230,.25);border-radius:8px;background:rgba(4,9,18,.72);}' +
+        '.mpb-bt-row{display:grid;grid-template-columns:70px 1fr 40px 55px;gap:8px;padding:4px 6px;font-size:10px;color:#c8dcff;border-bottom:1px solid rgba(125,170,230,.12);}' +
+        '.mpb-bt-row:last-child{border-bottom:none;}';
+      document.documentElement.appendChild(style);
+    }
+
+    var card = document.getElementById('mpb-bt-card');
+    if (!card) {
+      card = document.createElement('div');
+      card.id = 'mpb-bt-card';
+      card.innerHTML =
+        '<div id="mpb-bt-title">Backtester Tab</div>' +
+        '<div id="mpb-bt-grid">' +
+        '  <select id="mpb-bt-strategy"></select>' +
+        '  <input id="mpb-bt-base" type="number" step="0.01" value="1" placeholder="Base amount" />' +
+        '  <input id="mpb-bt-multi" type="number" step="0.1" value="2" placeholder="Multiplier" />' +
+        '  <input id="mpb-bt-payout" type="number" step="0.1" value="92" placeholder="Payout %" />' +
+        '  <input id="mpb-bt-steps" type="number" step="1" value="2" placeholder="Max steps" />' +
+        '  <button id="mpb-bt-refresh" class="btn btn-green" style="width:100%;padding:6px 8px;font-size:11px;">Refresh Backtest</button>' +
+        '</div>' +
+        '<div id="mpb-bt-stats"></div>' +
+        '<div id="mpb-bt-rows"></div>';
+      modal.appendChild(card);
+
+      card.querySelector('#mpb-bt-refresh').addEventListener('click', function () {
+        post('runtimeSnapshot');
+        render();
+      });
+
+      var fields = card.querySelectorAll('input,select');
+      for (var i = 0; i < fields.length; i++) {
+        fields[i].addEventListener('input', render);
+        fields[i].addEventListener('change', render);
+      }
+    }
+
+    render();
+  }
+
+  window.addEventListener('message', function (evt) {
+    var d = evt && evt.data ? evt.data : {};
+    if (!d.belobot) return;
+
+    if (d.act === 'runtimeSnapshot' && d.snapshot && d.snapshot.tracker) {
+      ingestClosedOrders(d.snapshot.tracker.closedOrders || []);
+      render();
+      return;
+    }
+
+    if (d.act === 'trackerOrderClose' && d.order) {
+      ingestClosedOrder(d.order);
+      render();
+    }
+  }, true);
+
+  function boot() {
+    ensureUI();
+    post('runtimeSnapshot');
+    setInterval(ensureUI, 1200);
+    setInterval(function () {
+      post('runtimeSnapshot');
+    }, 5000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
