@@ -1166,6 +1166,10 @@ function initMoneyPrinterUI() {
       return;
     }
 
+    if (closedOrders.length < trackerCloseCursor) {
+      trackerCloseCursor = 0;
+    }
+
     if (closedOrders.length <= trackerCloseCursor) {
       return;
     }
@@ -1174,36 +1178,41 @@ function initMoneyPrinterUI() {
     trackerCloseCursor = closedOrders.length;
 
     for (var i = 0; i < fresh.length; i++) {
-      var order = fresh[i] || {};
-      var tagInfo = parseTunnelTag(order.strategyTag);
-      if (!tagInfo) {
-        continue;
+      processSingleClosedOrder(fresh[i] || {});
+    }
+  }
+
+  function processSingleClosedOrder(order) {
+    if (!order || typeof order !== 'object') return;
+
+    var tagInfo = parseTunnelTag(order.strategyTag);
+    if (!tagInfo) {
+      return;
+    }
+
+    var tunnel = martingaleTunnels[tagInfo.tunnelId];
+    if (!tunnel) {
+      return;
+    }
+
+    var pnl = Number(order.profit);
+    if (!isFinite(pnl)) pnl = 0;
+
+    if (tagInfo.step === '1') {
+      if (tunnel.state !== 'await-step1-close') {
+        return;
       }
-
-      var tunnel = martingaleTunnels[tagInfo.tunnelId];
-      if (!tunnel) {
-        continue;
+      if (pnl < 0) {
+        fireMartingaleStep2(tunnel, pnl);
+      } else {
+        closeTunnel(tunnel, pnl, 'step1-no-loss');
       }
+      return;
+    }
 
-      var pnl = Number(order.profit);
-      if (!isFinite(pnl)) pnl = 0;
-
-      if (tagInfo.step === '1') {
-        if (tunnel.state !== 'await-step1-close') {
-          continue;
-        }
-        if (pnl < 0) {
-          fireMartingaleStep2(tunnel, pnl);
-        } else {
-          closeTunnel(tunnel, pnl, 'step1-no-loss');
-        }
-        continue;
-      }
-
-      if (tagInfo.step === '2') {
-        if (tunnel.state === 'await-step2-close') {
-          closeTunnel(tunnel, pnl, 'step2-complete');
-        }
+    if (tagInfo.step === '2') {
+      if (tunnel.state === 'await-step2-close') {
+        closeTunnel(tunnel, pnl, 'step2-complete');
       }
     }
   }
@@ -1222,6 +1231,11 @@ function initMoneyPrinterUI() {
       runtimeState = d.snapshot;
       updateStatus();
       evaluateMartingaleFromTracker(d.snapshot);
+      return;
+    }
+
+    if (d.act === 'trackerOrderClose' && d.order) {
+      processSingleClosedOrder(d.order);
       return;
     }
 

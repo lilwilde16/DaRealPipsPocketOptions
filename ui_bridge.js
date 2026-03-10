@@ -199,11 +199,21 @@
   tracker.subscribe(function onTrackerEvent(eventName, payload) {
     if (eventName === 'order.open') {
       postInfo('Order opened #' + payload.id + ' [' + payload.strategyTag + ']');
+      window.postMessage({
+        belobot: true,
+        act: 'trackerOrderOpen',
+        order: payload
+      }, window.location.href);
     }
     if (eventName === 'order.close') {
       var pnl = Number(payload.profit) || 0;
       var sign = pnl > 0 ? '+' : '';
-      postInfo('Order closed #' + payload.id + ' pnl ' + sign + pnl.toFixed(2));
+      postInfo('Order closed #' + payload.id + ' pnl ' + sign + pnl.toFixed(2) + ' [' + (payload.strategyTag || 'unknown') + ']');
+      window.postMessage({
+        belobot: true,
+        act: 'trackerOrderClose',
+        order: payload
+      }, window.location.href);
     }
   });
 
