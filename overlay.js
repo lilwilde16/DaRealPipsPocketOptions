@@ -859,3 +859,287 @@ function initMoneyPrinterUI() {
 
   setInterval(rebind, 2500);
 })();
+
+
+/* ================= MPB COMPAT TOOLS TEST PANEL ================= */
+(function MPBCompatToolsPanel() {
+  if (window.__MPB_COMPAT_TOOLS__) return;
+  window.__MPB_COMPAT_TOOLS__ = true;
+
+  var runtimeState = {
+    armed: false,
+    started: false,
+    queueSize: 0,
+    queuedTrades: [],
+    tracker: { pendingQueue: [], openOrders: [], closedOrders: [] }
+  };
+  var martingaleRun = null;
+
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : '';
+  }
+
+  function num(id, fallback) {
+    var n = Number(val(id));
+    return isFinite(n) ? n : fallback;
+  }
+
+  function post(act, extra) {
+    var payload = { belobot: true, act: act };
+    if (extra && typeof extra === 'object') {
+      for (var k in extra) payload[k] = extra[k];
+    }
+    window.postMessage(payload, window.location.href);
+  }
+
+  function logLine(text, ok) {
+    var box = document.getElementById('mpb-tools-log');
+    if (!box) return;
+    var row = document.createElement('div');
+    row.style.color = ok ? '#b8ffd5' : '#ffd7dc';
+    row.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+    box.prepend(row);
+    while (box.childNodes.length > 18) {
+      box.removeChild(box.lastChild);
+    }
+  }
+
+  function updateStatus() {
+    var el = document.getElementById('mpb-tools-status');
+    if (!el) return;
+    var closed = (runtimeState.tracker && runtimeState.tracker.closedOrders) ? runtimeState.tracker.closedOrders.length : 0;
+    var open = (runtimeState.tracker && runtimeState.tracker.openOrders) ? runtimeState.tracker.openOrders.length : 0;
+    el.textContent =
+      'Armed: ' + (runtimeState.armed ? 'YES' : 'NO') +
+      ' | Started: ' + (runtimeState.started ? 'YES' : 'NO') +
+      ' | Queue: ' + runtimeState.queueSize +
+      ' | Open: ' + open +
+      ' | Closed: ' + closed;
+  }
+
+  function getTradeFromInputs(multiplier) {
+    var amount = num('mpb-tools-amount', 1);
+    var trade = {
+      asset: val('mpb-tools-asset').trim(),
+      direction: val('mpb-tools-direction') || 'call',
+      amount: Math.max(0.35, Math.round(amount * (multiplier || 1) * 100) / 100),
+      mode: val('mpb-tools-mode') || 'demo',
+      strategyTag: val('mpb-tools-tag').trim() || 'compat-tools'
+    };
+    var expiry = num('mpb-tools-expiry', NaN);
+    if (isFinite(expiry) && expiry > 0) {
+      trade.expiry = expiry;
+    }
+    return trade;
+  }
+
+  function refreshSnapshot() {
+    post('runtimeSnapshot');
+  }
+
+  function wireEvents() {
+    var queueBtn = document.getElementById('mpb-tools-queue');
+    var runBtn = document.getElementById('mpb-tools-run');
+    var queueRunBtn = document.getElementById('mpb-tools-queue-run');
+    var clearBtn = document.getElementById('mpb-tools-clear');
+    var armBtn = document.getElementById('mpb-tools-arm');
+    var debugBtn = document.getElementById('mpb-tools-debug');
+    var snapBtn = document.getElementById('mpb-tools-snapshot');
+    var m1Btn = document.getElementById('mpb-tools-m1');
+    var startStopBtn = document.getElementById('mpb-tools-startstop');
+
+    if (queueBtn) {
+      queueBtn.addEventListener('click', function () {
+        var trade = getTradeFromInputs(1);
+        post('enqueueTrade', { trade: trade });
+        logLine('Queued trade request: ' + trade.asset + ' ' + trade.direction + ' ' + trade.amount, true);
+        setTimeout(refreshSnapshot, 120);
+      });
+    }
+
+    if (runBtn) {
+      runBtn.addEventListener('click', function () {
+        post('placeQueuedTradeNow');
+        logLine('Requested run for queued trade.', true);
+        setTimeout(refreshSnapshot, 180);
+      });
+    }
+
+    if (queueRunBtn) {
+      queueRunBtn.addEventListener('click', function () {
+        var trade = getTradeFromInputs(1);
+        post('enqueueTrade', { trade: trade });
+        setTimeout(function () { post('placeQueuedTradeNow'); }, 60);
+        logLine('Queue+Run request sent: ' + trade.asset + ' ' + trade.direction + ' ' + trade.amount, true);
+        setTimeout(refreshSnapshot, 220);
+      });
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        post('clearQueuedTrades');
+        logLine('Requested queue clear.', false);
+        setTimeout(refreshSnapshot, 120);
+      });
+    }
+
+    if (armBtn) {
+      armBtn.addEventListener('click', function () {
+        post('setArmed', { armed: !runtimeState.armed });
+        logLine('Set armed -> ' + (!runtimeState.armed), true);
+        setTimeout(refreshSnapshot, 180);
+      });
+    }
+
+    if (debugBtn) {
+      debugBtn.addEventListener('click', function () {
+        var enable = debugBtn.getAttribute('data-on') !== '1';
+        debugBtn.setAttribute('data-on', enable ? '1' : '0');
+        debugBtn.textContent = enable ? 'Debug: ON' : 'Debug: OFF';
+        post('setDebug', { enabled: enable });
+      });
+    }
+
+    if (snapBtn) {
+      snapBtn.addEventListener('click', refreshSnapshot);
+    }
+
+    if (startStopBtn) {
+      startStopBtn.addEventListener('click', function () {
+        post('start_stop');
+        setTimeout(refreshSnapshot, 180);
+      });
+    }
+
+    if (m1Btn) {
+      m1Btn.addEventListener('click', function () {
+        var multiplier = Math.max(1.1, num('mpb-tools-multi', 2));
+        var baseTrade = getTradeFromInputs(1);
+        martingaleRun = {
+          active: true,
+          baseTrade: baseTrade,
+          multiplier: multiplier,
+          startClosedCount: (runtimeState.tracker.closedOrders || []).length
+        };
+        post('enqueueTrade', { trade: baseTrade });
+        setTimeout(function () { post('placeQueuedTradeNow'); }, 60);
+        logLine('Martingale test started (step 1): ' + baseTrade.asset + ' ' + baseTrade.direction + ' ' + baseTrade.amount, true);
+        setTimeout(refreshSnapshot, 240);
+      });
+    }
+  }
+
+  function mount() {
+    if (document.getElementById('mpb-compat-tools')) return;
+
+    var css = document.createElement('style');
+    css.id = 'mpb-compat-tools-style';
+    css.textContent = '' +
+      '#mpb-compat-tools{position:fixed;top:86px;right:16px;z-index:2147483647;width:310px;background:rgba(8,12,22,.96);border:1px solid rgba(120,156,210,.5);border-radius:12px;box-shadow:0 14px 38px rgba(0,0,0,.62);padding:10px;color:#e8f1ff;font:12px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}' +
+      '#mpb-compat-tools h4{margin:0 0 8px 0;font-size:12px;letter-spacing:.3px;text-transform:uppercase;color:#a7c8ff;}' +
+      '#mpb-compat-tools .mpb-row{display:flex;gap:6px;margin-bottom:6px;}' +
+      '#mpb-compat-tools input,#mpb-compat-tools select{flex:1;min-width:0;background:#0f1a31;border:1px solid rgba(120,156,210,.45);border-radius:8px;color:#eef5ff;padding:6px;font-size:11px;outline:none;}' +
+      '#mpb-compat-tools button{background:#13305f;border:1px solid rgba(120,156,210,.45);color:#eaf2ff;border-radius:8px;padding:6px 8px;font-size:11px;cursor:pointer;}' +
+      '#mpb-compat-tools button:hover{filter:brightness(1.08);}' +
+      '#mpb-tools-status{font-size:10px;color:#8fb0e6;margin-bottom:6px;}' +
+      '#mpb-tools-log{max-height:110px;overflow:auto;background:rgba(5,8,14,.78);border:1px solid rgba(120,156,210,.32);border-radius:8px;padding:6px;font-size:10px;}' +
+      '#mpb-tools-log:empty::before{content:"No logs yet";color:#6987b8;}';
+    document.documentElement.appendChild(css);
+
+    var root = document.createElement('div');
+    root.id = 'mpb-compat-tools';
+    root.innerHTML =
+      '<h4>MPB Compat Tools</h4>' +
+      '<div id="mpb-tools-status">Loading runtime snapshot...</div>' +
+      '<div class="mpb-row">' +
+      '  <input id="mpb-tools-asset" placeholder="asset/pair" value="EURUSD_otc" />' +
+      '  <select id="mpb-tools-direction"><option value="call">call</option><option value="put">put</option></select>' +
+      '</div>' +
+      '<div class="mpb-row">' +
+      '  <input id="mpb-tools-amount" type="number" step="0.01" value="1" placeholder="amount" />' +
+      '  <input id="mpb-tools-expiry" type="number" step="1" placeholder="expiry" />' +
+      '</div>' +
+      '<div class="mpb-row">' +
+      '  <select id="mpb-tools-mode"><option value="demo">demo</option><option value="live">live</option></select>' +
+      '  <input id="mpb-tools-tag" value="compat-tools" placeholder="strategy tag" />' +
+      '</div>' +
+      '<div class="mpb-row">' +
+      '  <button id="mpb-tools-queue">Queue</button>' +
+      '  <button id="mpb-tools-run">Run Queued</button>' +
+      '  <button id="mpb-tools-queue-run">Queue+Run</button>' +
+      '</div>' +
+      '<div class="mpb-row">' +
+      '  <button id="mpb-tools-arm">Arm/Disarm</button>' +
+      '  <button id="mpb-tools-startstop">Start/Stop</button>' +
+      '  <button id="mpb-tools-clear">Clear Queue</button>' +
+      '</div>' +
+      '<div class="mpb-row">' +
+      '  <input id="mpb-tools-multi" type="number" step="0.1" value="2" placeholder="M1 mult" />' +
+      '  <button id="mpb-tools-m1">Run 1-Step Martin</button>' +
+      '</div>' +
+      '<div class="mpb-row">' +
+      '  <button id="mpb-tools-debug" data-on="0">Debug: OFF</button>' +
+      '  <button id="mpb-tools-snapshot">Refresh Snapshot</button>' +
+      '</div>' +
+      '<div id="mpb-tools-log"></div>';
+
+    document.documentElement.appendChild(root);
+    wireEvents();
+    refreshSnapshot();
+    setInterval(refreshSnapshot, 3000);
+  }
+
+  window.addEventListener('message', function (evt) {
+    var d = evt && evt.data ? evt.data : {};
+    if (!d.belobot) return;
+
+    if (d.act === 'runtimeSnapshot' && d.snapshot) {
+      runtimeState = d.snapshot;
+      updateStatus();
+      return;
+    }
+
+    if (d.info_text) {
+      logLine(String(d.info_text), true);
+      return;
+    }
+
+    if (d.robotDeals && Array.isArray(d.robotDeals.closed)) {
+      var closed = d.robotDeals.closed;
+      if (martingaleRun && martingaleRun.active && closed.length > martingaleRun.startClosedCount) {
+        var lastProfit = Number(closed[closed.length - 1]) || 0;
+        if (lastProfit < 0) {
+          var step2 = {
+            asset: martingaleRun.baseTrade.asset,
+            direction: martingaleRun.baseTrade.direction,
+            amount: Math.round(martingaleRun.baseTrade.amount * martingaleRun.multiplier * 100) / 100,
+            mode: martingaleRun.baseTrade.mode,
+            strategyTag: martingaleRun.baseTrade.strategyTag + '-m1'
+          };
+          if (typeof martingaleRun.baseTrade.expiry !== 'undefined') {
+            step2.expiry = martingaleRun.baseTrade.expiry;
+          }
+          post('enqueueTrade', { trade: step2 });
+          setTimeout(function () { post('placeQueuedTradeNow'); }, 60);
+          logLine('Martingale step 2 fired after loss: amount ' + step2.amount, false);
+        } else {
+          logLine('Martingale step 2 skipped (step 1 pnl: ' + lastProfit.toFixed(2) + ')', true);
+        }
+        martingaleRun.active = false;
+        setTimeout(refreshSnapshot, 220);
+      }
+    }
+  }, true);
+
+  function bootWhenReady() {
+    if (!document.documentElement) return;
+    mount();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootWhenReady);
+  } else {
+    bootWhenReady();
+  }
+})();
