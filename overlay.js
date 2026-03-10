@@ -1097,6 +1097,61 @@ function initMoneyPrinterUI() {
     setInterval(refreshSnapshot, 3000);
   }
 
+  function fireMartingaleStep2() {
+    if (!martingaleRun || !martingaleRun.active) return;
+
+    var step2 = {
+      asset: martingaleRun.baseTrade.asset,
+      direction: martingaleRun.baseTrade.direction,
+      amount: Math.round(martingaleRun.baseTrade.amount * martingaleRun.multiplier * 100) / 100,
+      mode: martingaleRun.baseTrade.mode,
+      strategyTag: martingaleRun.baseTrade.strategyTag + '-m1'
+    };
+    if (typeof martingaleRun.baseTrade.expiry !== 'undefined') {
+      step2.expiry = martingaleRun.baseTrade.expiry;
+    }
+
+    post('placeSignalTrade', { trade: step2 });
+    logLine('Martingale step 2 fired after loss: amount ' + step2.amount, false);
+    martingaleRun.active = false;
+    setTimeout(refreshSnapshot, 220);
+  }
+
+  function skipMartingaleStep2(lastProfit) {
+    if (!martingaleRun || !martingaleRun.active) return;
+    logLine('Martingale step 2 skipped (step 1 pnl: ' + Number(lastProfit || 0).toFixed(2) + ')', true);
+    martingaleRun.active = false;
+    setTimeout(refreshSnapshot, 220);
+  }
+
+  function evaluateMartingaleFromTracker(snapshot) {
+    if (!martingaleRun || !martingaleRun.active) return;
+    var tracker = snapshot && snapshot.tracker ? snapshot.tracker : null;
+    var closedOrders = tracker && Array.isArray(tracker.closedOrders) ? tracker.closedOrders : [];
+    if (closedOrders.length <= martingaleRun.startClosedCount) return;
+
+    var lastOrder = closedOrders[closedOrders.length - 1] || {};
+    var lastProfit = Number(lastOrder.profit) || 0;
+    if (lastProfit < 0) {
+      fireMartingaleStep2();
+    } else {
+      skipMartingaleStep2(lastProfit);
+    }
+  }
+
+  function evaluateMartingaleFromRobotDeals(profits) {
+    if (!martingaleRun || !martingaleRun.active) return;
+    var closed = Array.isArray(profits) ? profits : [];
+    if (closed.length <= martingaleRun.startClosedCount) return;
+
+    var lastProfit = Number(closed[closed.length - 1]) || 0;
+    if (lastProfit < 0) {
+      fireMartingaleStep2();
+    } else {
+      skipMartingaleStep2(lastProfit);
+    }
+  }
+
   window.addEventListener('message', function (evt) {
     var d = evt && evt.data ? evt.data : {};
     if (!d.belobot) return;
@@ -1104,6 +1159,7 @@ function initMoneyPrinterUI() {
     if (d.act === 'runtimeSnapshot' && d.snapshot) {
       runtimeState = d.snapshot;
       updateStatus();
+      evaluateMartingaleFromTracker(d.snapshot);
       return;
     }
 
@@ -1113,28 +1169,7 @@ function initMoneyPrinterUI() {
     }
 
     if (d.robotDeals && Array.isArray(d.robotDeals.closed)) {
-      var closed = d.robotDeals.closed;
-      if (martingaleRun && martingaleRun.active && closed.length > martingaleRun.startClosedCount) {
-        var lastProfit = Number(closed[closed.length - 1]) || 0;
-        if (lastProfit < 0) {
-          var step2 = {
-            asset: martingaleRun.baseTrade.asset,
-            direction: martingaleRun.baseTrade.direction,
-            amount: Math.round(martingaleRun.baseTrade.amount * martingaleRun.multiplier * 100) / 100,
-            mode: martingaleRun.baseTrade.mode,
-            strategyTag: martingaleRun.baseTrade.strategyTag + '-m1'
-          };
-          if (typeof martingaleRun.baseTrade.expiry !== 'undefined') {
-            step2.expiry = martingaleRun.baseTrade.expiry;
-          }
-          post('placeSignalTrade', { trade: step2 });
-          logLine('Martingale step 2 fired after loss: amount ' + step2.amount, false);
-        } else {
-          logLine('Martingale step 2 skipped (step 1 pnl: ' + lastProfit.toFixed(2) + ')', true);
-        }
-        martingaleRun.active = false;
-        setTimeout(refreshSnapshot, 220);
-      }
+      evaluateMartingaleFromRobotDeals(d.robotDeals.closed);
     }
   }, true);
 

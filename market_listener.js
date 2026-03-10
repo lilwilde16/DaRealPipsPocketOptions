@@ -9,6 +9,7 @@
   }
 
   var listeners = {};
+  var pendingEventName = '';
 
   function on(event, handler) {
     if (!listeners[event]) {
@@ -122,9 +123,33 @@
     return 'unknown';
   }
 
+  function isKnownServerEventName(name) {
+    return name === 'updateStream' ||
+      name === 'updateHistoryNew' ||
+      name === 'updateAssets' ||
+      name === 'successupdateBalance' ||
+      name === 'updateOpenedDeals' ||
+      name === 'successopenOrder' ||
+      name === 'successcloseOrder' ||
+      name === 'upsignals' ||
+      name === 'signals/load' ||
+      name === 'signals/update' ||
+      name === 'updateSignalForecast';
+  }
+
   bridge.on('inbound.parsed', function onInbound(ctx) {
     var payload = ctx && ctx.parsed;
     var serverEvent = extractServerEvent(payload);
+    var usedPendingFallback = false;
+
+    if (serverEvent.eventName && isKnownServerEventName(serverEvent.eventName)) {
+      pendingEventName = serverEvent.eventName;
+    } else if (!serverEvent.eventName && pendingEventName) {
+      // Some broker messages carry the event type in one frame and payload in another.
+      serverEvent.eventName = pendingEventName;
+      usedPendingFallback = true;
+    }
+
     var category = classify(serverEvent);
 
     emit('server.event', {
@@ -142,6 +167,10 @@
     var closed = extractOrderClose(serverEvent);
     if (closed && closed.length) {
       emit('order.close', closed);
+    }
+
+    if (usedPendingFallback) {
+      pendingEventName = '';
     }
   });
 
