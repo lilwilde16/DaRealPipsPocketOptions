@@ -873,7 +873,8 @@ function initMoneyPrinterUI() {
     queuedTrades: [],
     tracker: { pendingQueue: [], openOrders: [], closedOrders: [] }
   };
-  var martingaleRun = null;
+  var martingaleTunnels = {};
+  var trackerCloseCursor = -1;
 
   function val(id) {
     var el = document.getElementById(id);
@@ -910,12 +911,38 @@ function initMoneyPrinterUI() {
     if (!el) return;
     var closed = (runtimeState.tracker && runtimeState.tracker.closedOrders) ? runtimeState.tracker.closedOrders.length : 0;
     var open = (runtimeState.tracker && runtimeState.tracker.openOrders) ? runtimeState.tracker.openOrders.length : 0;
+    var activeTunnels = Object.keys(martingaleTunnels).length;
     el.textContent =
       'Armed: ' + (runtimeState.armed ? 'YES' : 'NO') +
       ' | Started: ' + (runtimeState.started ? 'YES' : 'NO') +
       ' | Queue: ' + runtimeState.queueSize +
       ' | Open: ' + open +
-      ' | Closed: ' + closed;
+      ' | Closed: ' + closed +
+      ' | M1: ' + activeTunnels;
+  }
+
+  function createTunnelId() {
+    return String(Date.now()) + '-' + String(Math.floor(Math.random() * 100000));
+  }
+
+  function parseTunnelTag(tag) {
+    var txt = String(tag || '');
+    var marker = '|m1:';
+    var at = txt.indexOf(marker);
+    if (at < 0) return null;
+
+    var rest = txt.slice(at + marker.length);
+    var stepAt = rest.lastIndexOf(':s');
+    if (stepAt < 0) return null;
+
+    var tunnelId = rest.slice(0, stepAt);
+    var step = rest.slice(stepAt + 2);
+    if (!tunnelId || (step !== '1' && step !== '2')) return null;
+
+    return {
+      tunnelId: tunnelId,
+      step: step
+    };
   }
 
   function getTradeFromInputs(multiplier) {
@@ -1020,14 +1047,28 @@ function initMoneyPrinterUI() {
         if (!runtimeState.armed) {
           post('setArmed', { armed: true });
         }
-        martingaleRun = {
-          active: true,
+
+        var tunnelId = createTunnelId();
+        var rootTag = (baseTrade.strategyTag || 'compat-tools') + '|m1:' + tunnelId;
+        var step1Trade = {
+          asset: baseTrade.asset,
+          direction: baseTrade.direction,
+          amount: baseTrade.amount,
+          mode: baseTrade.mode,
+          strategyTag: rootTag + ':s1'
+        };
+
+        martingaleTunnels[tunnelId] = {
+          tunnelId: tunnelId,
+          rootTag: rootTag,
           baseTrade: baseTrade,
           multiplier: multiplier,
-          startClosedCount: (runtimeState.tracker.closedOrders || []).length
+          state: 'await-step1-close',
+          createdAt: Date.now()
         };
-        post('placeSignalTrade', { trade: baseTrade });
-        logLine('Martingale test started (step 1): ' + baseTrade.asset + ' ' + baseTrade.direction + ' ' + baseTrade.amount, true);
+
+        post('placeSignalTrade', { trade: step1Trade });
+        logLine('Martingale tunnel ' + tunnelId + ' started (step 1): ' + step1Trade.asset + ' ' + step1Trade.direction + ' ' + step1Trade.amount, true);
         setTimeout(refreshSnapshot, 240);
       });
     }
@@ -1092,56 +1133,85 @@ function initMoneyPrinterUI() {
     setInterval(refreshSnapshot, 3000);
   }
 
-  function fireMartingaleStep2() {
-    if (!martingaleRun || !martingaleRun.active) return;
+  function fireMartingaleStep2(tunnel, lastProfit) {
+    if (!tunnel) return;
 
     var step2 = {
-      asset: martingaleRun.baseTrade.asset,
-      direction: martingaleRun.baseTrade.direction,
-      amount: Math.round(martingaleRun.baseTrade.amount * martingaleRun.multiplier * 100) / 100,
-      mode: martingaleRun.baseTrade.mode,
-      strategyTag: martingaleRun.baseTrade.strategyTag + '-m1'
+      asset: tunnel.baseTrade.asset,
+      direction: tunnel.baseTrade.direction,
+      amount: Math.round(tunnel.baseTrade.amount * tunnel.multiplier * 100) / 100,
+      mode: tunnel.baseTrade.mode,
+      strategyTag: tunnel.rootTag + ':s2'
     };
 
     post('placeSignalTrade', { trade: step2 });
-    logLine('Martingale step 2 fired after loss: amount ' + step2.amount, false);
-    martingaleRun.active = false;
+    tunnel.state = 'await-step2-close';
+    logLine('Martingale tunnel ' + tunnel.tunnelId + ' step 2 fired after loss ' + Number(lastProfit || 0).toFixed(2) + ': amount ' + step2.amount, false);
     setTimeout(refreshSnapshot, 220);
   }
 
-  function skipMartingaleStep2(lastProfit) {
-    if (!martingaleRun || !martingaleRun.active) return;
-    logLine('Martingale step 2 skipped (step 1 pnl: ' + Number(lastProfit || 0).toFixed(2) + ')', true);
-    martingaleRun.active = false;
+  function closeTunnel(tunnel, lastProfit, reason) {
+    if (!tunnel) return;
+    logLine('Martingale tunnel ' + tunnel.tunnelId + ' closed [' + reason + '] pnl ' + Number(lastProfit || 0).toFixed(2), true);
+    delete martingaleTunnels[tunnel.tunnelId];
+    updateStatus();
     setTimeout(refreshSnapshot, 220);
+  }
+
+  function processClosedOrders(closedOrders) {
+    if (!Array.isArray(closedOrders)) return;
+
+    if (trackerCloseCursor < 0) {
+      trackerCloseCursor = closedOrders.length;
+      return;
+    }
+
+    if (closedOrders.length <= trackerCloseCursor) {
+      return;
+    }
+
+    var fresh = closedOrders.slice(trackerCloseCursor);
+    trackerCloseCursor = closedOrders.length;
+
+    for (var i = 0; i < fresh.length; i++) {
+      var order = fresh[i] || {};
+      var tagInfo = parseTunnelTag(order.strategyTag);
+      if (!tagInfo) {
+        continue;
+      }
+
+      var tunnel = martingaleTunnels[tagInfo.tunnelId];
+      if (!tunnel) {
+        continue;
+      }
+
+      var pnl = Number(order.profit);
+      if (!isFinite(pnl)) pnl = 0;
+
+      if (tagInfo.step === '1') {
+        if (tunnel.state !== 'await-step1-close') {
+          continue;
+        }
+        if (pnl < 0) {
+          fireMartingaleStep2(tunnel, pnl);
+        } else {
+          closeTunnel(tunnel, pnl, 'step1-no-loss');
+        }
+        continue;
+      }
+
+      if (tagInfo.step === '2') {
+        if (tunnel.state === 'await-step2-close') {
+          closeTunnel(tunnel, pnl, 'step2-complete');
+        }
+      }
+    }
   }
 
   function evaluateMartingaleFromTracker(snapshot) {
-    if (!martingaleRun || !martingaleRun.active) return;
     var tracker = snapshot && snapshot.tracker ? snapshot.tracker : null;
     var closedOrders = tracker && Array.isArray(tracker.closedOrders) ? tracker.closedOrders : [];
-    if (closedOrders.length <= martingaleRun.startClosedCount) return;
-
-    var lastOrder = closedOrders[closedOrders.length - 1] || {};
-    var lastProfit = Number(lastOrder.profit) || 0;
-    if (lastProfit < 0) {
-      fireMartingaleStep2();
-    } else {
-      skipMartingaleStep2(lastProfit);
-    }
-  }
-
-  function evaluateMartingaleFromRobotDeals(profits) {
-    if (!martingaleRun || !martingaleRun.active) return;
-    var closed = Array.isArray(profits) ? profits : [];
-    if (closed.length <= martingaleRun.startClosedCount) return;
-
-    var lastProfit = Number(closed[closed.length - 1]) || 0;
-    if (lastProfit < 0) {
-      fireMartingaleStep2();
-    } else {
-      skipMartingaleStep2(lastProfit);
-    }
+    processClosedOrders(closedOrders);
   }
 
   window.addEventListener('message', function (evt) {
@@ -1158,10 +1228,6 @@ function initMoneyPrinterUI() {
     if (d.info_text) {
       logLine(String(d.info_text), true);
       return;
-    }
-
-    if (d.robotDeals && Array.isArray(d.robotDeals.closed)) {
-      evaluateMartingaleFromRobotDeals(d.robotDeals.closed);
     }
   }, true);
 
