@@ -65,6 +65,7 @@
         "execution_engine.js",
         "ui_bridge.js",
         "trader_runtime.js",
+        "ma_crossover_strategy.js",
         "icon/*"
       ],
       "matches": [

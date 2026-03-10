@@ -15,7 +15,7 @@
     armed: false,
     debug: false,
     settings: {
-      strategy: 'signals',
+      strategy: 'ma_crossover',
       min_profit: 80,
       delay: 0,
       deals_limit: 10,
@@ -27,7 +27,12 @@
       use_otc: true,
       started: false,
       martinSteps: [2, 2, 2, 2],
-      useMartin: false
+      useMartin: false,
+      maFast: 9,
+      maSlow: 21,
+      maAmount: 1,
+      maPair: '',
+      maCooldownMs: 8000
     }
   };
 

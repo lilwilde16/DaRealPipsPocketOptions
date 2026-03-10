@@ -12,7 +12,8 @@
     "order_tracker.js",
     "execution_engine.js",
     "ui_bridge.js",
-    "trader_runtime.js"
+    "trader_runtime.js",
+    "ma_crossover_strategy.js"
   ];
 
   function injectNext(index) {

@@ -13,6 +13,13 @@
   var closedOrders = [];
   var listeners = [];
 
+  function normalizeDirection(value) {
+    var d = String(value || '').toLowerCase();
+    if (d === '0' || d === 'call' || d === 'up' || d === 'buy') return 'call';
+    if (d === '1' || d === 'put' || d === 'down' || d === 'sell') return 'put';
+    return d;
+  }
+
   function emit(event, payload) {
     for (var i = 0; i < listeners.length; i += 1) {
       try {
@@ -110,6 +117,37 @@
         closedAt: Date.now(),
         strategyTag: open && open.strategyTag ? open.strategyTag : 'unknown'
       };
+
+      var expected = open && open.queueTrade ? open.queueTrade : null;
+      var expectedAmount = expected ? Number(expected.amount) : NaN;
+      var expectedAsset = expected ? String(expected.asset || '') : '';
+      var expectedDirection = expected ? normalizeDirection(expected.direction) : '';
+      var actualDirection = normalizeDirection(deal.command);
+      if (!actualDirection && deal.raw && typeof deal.raw === 'object') {
+        actualDirection = normalizeDirection(deal.raw.action || deal.raw.direction || deal.raw.side);
+      }
+      var actualAmount = Number(deal.amount);
+      var actualAsset = String(deal.asset || '');
+
+      var amountMatched = isFinite(expectedAmount) && isFinite(actualAmount)
+        ? Math.abs(expectedAmount - actualAmount) <= 0.011
+        : null;
+      var assetMatched = expectedAsset ? expectedAsset === actualAsset : null;
+      var directionMatched = expectedDirection ? expectedDirection === actualDirection : null;
+
+      closed.expectedAmount = isFinite(expectedAmount) ? expectedAmount : null;
+      closed.actualAmount = isFinite(actualAmount) ? actualAmount : null;
+      closed.expectedAsset = expectedAsset || null;
+      closed.actualAsset = actualAsset || null;
+      closed.expectedDirection = expectedDirection || null;
+      closed.actualDirection = actualDirection || null;
+      closed.amountMatched = amountMatched;
+      closed.assetMatched = assetMatched;
+      closed.directionMatched = directionMatched;
+      closed.executionMatched =
+        amountMatched === null && assetMatched === null && directionMatched === null
+          ? null
+          : (amountMatched !== false && assetMatched !== false && directionMatched !== false);
 
       closedOrders.push(closed);
       if (openOrders[key]) {

@@ -1302,7 +1302,8 @@ function initMoneyPrinterUI() {
       strategyTag: String(order.strategyTag || 'unknown'),
       strategy: strategyKey(order.strategyTag),
       step: strategyStep(order.strategyTag),
-      closedAt: Number(order.closedAt) || Date.now()
+      closedAt: Number(order.closedAt) || Date.now(),
+      executionMatched: typeof order.executionMatched === 'boolean' ? order.executionMatched : null
     };
 
     closesById[id] = normalized;
@@ -1329,6 +1330,8 @@ function initMoneyPrinterUI() {
     var maxLossStreak = 0;
     var streak = 0;
     var realizedMaxStep = 1;
+    var execChecks = 0;
+    var execPass = 0;
 
     for (var i = 0; i < events.length; i++) {
       var p = Number(events[i].profit) || 0;
@@ -1347,6 +1350,13 @@ function initMoneyPrinterUI() {
       if (step > realizedMaxStep) {
         realizedMaxStep = step;
       }
+
+      if (events[i].executionMatched !== null && typeof events[i].executionMatched !== 'undefined') {
+        execChecks += 1;
+        if (events[i].executionMatched) {
+          execPass += 1;
+        }
+      }
     }
 
     return {
@@ -1357,7 +1367,10 @@ function initMoneyPrinterUI() {
       pnl: pnl,
       avgPnl: total ? pnl / total : 0,
       maxLossStreak: maxLossStreak,
-      realizedMaxStep: realizedMaxStep
+      realizedMaxStep: realizedMaxStep,
+      execChecks: execChecks,
+      execPass: execPass,
+      execAccuracy: execChecks ? (execPass / execChecks) * 100 : 0
     };
   }
 
@@ -1405,22 +1418,15 @@ function initMoneyPrinterUI() {
     var rows = document.getElementById('mpb-bt-rows');
     if (!sel || !stats || !rows) return;
 
-    var current = sel.value || 'all';
-    var seen = {};
-    for (var i = 0; i < closes.length; i++) {
-      seen[closes[i].strategy] = true;
-    }
-    var strategies = Object.keys(seen).sort();
+    var current = sel.value || 'ma-crossover';
 
-    sel.innerHTML = '<option value="all">All strategies</option>';
-    for (var s = 0; s < strategies.length; s++) {
-      var opt = document.createElement('option');
-      opt.value = strategies[s];
-      opt.textContent = strategies[s];
-      sel.appendChild(opt);
-    }
-    if (current && (current === 'all' || seen[current])) {
+    sel.innerHTML =
+      '<option value="ma-crossover">ma-crossover</option>' +
+      '<option value="all">All strategies</option>';
+    if (current === 'all' || current === 'ma-crossover') {
       sel.value = current;
+    } else {
+      sel.value = 'ma-crossover';
     }
 
     var strategy = sel.value || 'all';
@@ -1441,7 +1447,8 @@ function initMoneyPrinterUI() {
       '<div>Total: <b>' + summary.total + '</b> | Wins: <b>' + summary.wins + '</b> | Losses: <b>' + summary.losses + '</b></div>' +
       '<div>Accuracy: <b>' + summary.accuracy.toFixed(2) + '%</b> | Real PnL: <b>' + (summary.pnl >= 0 ? '+' : '') + summary.pnl.toFixed(2) + '</b> | Avg: <b>' + (summary.avgPnl >= 0 ? '+' : '') + summary.avgPnl.toFixed(2) + '</b></div>' +
       '<div>Max Loss Streak: <b>' + summary.maxLossStreak + '</b> | Realized M Step: <b>' + summary.realizedMaxStep + '</b></div>' +
-      '<div>Sim M Depth: <b>' + sim.maxDepth + '</b> | Sim Cycle Stops @ maxSteps: <b>' + sim.cycleStops + '</b> | Sim PnL: <b>' + (sim.simPnl >= 0 ? '+' : '') + sim.simPnl.toFixed(2) + '</b></div>';
+      '<div>Sim M Depth: <b>' + sim.maxDepth + '</b> | Sim Cycle Stops @ maxSteps: <b>' + sim.cycleStops + '</b> | Sim PnL: <b>' + (sim.simPnl >= 0 ? '+' : '') + sim.simPnl.toFixed(2) + '</b></div>' +
+      '<div>Execution Match: <b>' + summary.execPass + '/' + summary.execChecks + '</b> (' + summary.execAccuracy.toFixed(2) + '%)</div>';
 
     var recent = filtered.slice(Math.max(0, filtered.length - 14)).reverse();
     rows.innerHTML = '';
@@ -1540,4 +1547,44 @@ function initMoneyPrinterUI() {
   } else {
     boot();
   }
+})();
+
+
+/* ================= MPB STRATEGY UI CLAMP ================= */
+(function MPBStrategyUIClamp() {
+  if (window.__MPB_STRATEGY_CLAMP__) return;
+  window.__MPB_STRATEGY_CLAMP__ = true;
+
+  function applyClamp() {
+    var select = document.querySelector('#sub-menu-robot-modal #strategy');
+    if (!select) return;
+
+    var onlyOne = select.options.length === 1 && select.options[0].value === 'ma_crossover';
+    if (!onlyOne) {
+      select.innerHTML = '';
+      var opt = document.createElement('option');
+      opt.value = 'ma_crossover';
+      opt.textContent = 'MA Crossover';
+      select.appendChild(opt);
+    }
+
+    if (select.value !== 'ma_crossover') {
+      select.value = 'ma_crossover';
+      window.postMessage({ belobot: true, act: 'setState', settings: { strategy: 'ma_crossover' } }, window.location.href);
+      window.postMessage({ belobot: true, act: 'readState' }, window.location.href);
+    }
+
+    var bbSignals = document.getElementById('bb_signals');
+    if (bbSignals) bbSignals.style.display = 'none';
+    var bbMartinSteps = document.getElementById('bb_martinSteps');
+    if (bbMartinSteps) bbMartinSteps.style.display = 'none';
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyClamp);
+  } else {
+    applyClamp();
+  }
+
+  setInterval(applyClamp, 1200);
 })();
