@@ -105,14 +105,66 @@
     return '';
   }
 
+  function getTradeBody(payload) {
+    if (Array.isArray(payload) && isObject(payload[1])) {
+      return payload[1];
+    }
+    if (isObject(payload)) {
+      return payload;
+    }
+    return null;
+  }
+
+  function countPresentKeys(obj, keys) {
+    if (!obj || typeof obj !== 'object') {
+      return 0;
+    }
+    var count = 0;
+    for (var i = 0; i < keys.length; i += 1) {
+      if (hasOwn(obj, keys[i])) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   function isTradeRequest(payload) {
     if (!payload) {
       return false;
     }
 
     var name = String(eventName(payload) || '').toLowerCase();
+    var body = getTradeBody(payload);
+
+    var knownNonTrade = {
+      updatestream: true,
+      updatehistorynew: true,
+      updateassets: true,
+      successupdatebalance: true,
+      updateopeneddeals: true,
+      successcloseorder: true,
+      successopenorder: true,
+      upsignals: true,
+      'signals/load': true,
+      'signals/update': true,
+      updatesignalforecast: true
+    };
+
     if (name.indexOf('openorder') >= 0 || name.indexOf('trade') >= 0 || name.indexOf('deal') >= 0) {
       return true;
+    }
+
+    if (name && knownNonTrade[name]) {
+      return false;
+    }
+
+    if (body) {
+      var amountScore = countPresentKeys(body, ['amount', 'sum', 'stake', 'value']);
+      var assetScore = countPresentKeys(body, ['asset', 'pair', 'symbol', 'instrument']);
+      var sideScore = countPresentKeys(body, ['action', 'direction', 'side', 'command']);
+      if ((amountScore + assetScore + sideScore) >= 2) {
+        return true;
+      }
     }
 
     if (Array.isArray(payload) && isObject(payload[1])) {
@@ -135,33 +187,45 @@
   function rewriteTradeRequest(payload, queuedTrade) {
     var rewritten = deepClone(payload);
     var normalizedDirection = normalizeDirection(queuedTrade.direction);
+    var body = getTradeBody(rewritten);
 
-    updateFirstExistingKey(rewritten, ['asset', 'pair', 'symbol', 'instrument'], queuedTrade.asset);
+    if (!body || typeof body !== 'object') {
+      return rewritten;
+    }
 
-    if (normalizedDirection) {
-      updateFirstExistingKey(rewritten, ['action', 'direction', 'side'], normalizedDirection);
-      if (normalizedDirection === 'call') {
-        updateFirstExistingKey(rewritten, ['command'], 0);
-      } else if (normalizedDirection === 'put') {
-        updateFirstExistingKey(rewritten, ['command'], 1);
+    function setOrInsert(keys, fallbackKey, value) {
+      var changed = updateFirstExistingKey(body, keys, value);
+      if (!changed && fallbackKey) {
+        body[fallbackKey] = value;
       }
     }
 
-    updateFirstExistingKey(rewritten, ['amount', 'sum', 'stake'], queuedTrade.amount);
+    setOrInsert(['asset', 'pair', 'symbol', 'instrument'], 'asset', queuedTrade.asset);
+
+    if (normalizedDirection) {
+      setOrInsert(['action', 'direction', 'side'], 'action', normalizedDirection);
+      if (normalizedDirection === 'call') {
+        setOrInsert(['command'], 'command', 0);
+      } else if (normalizedDirection === 'put') {
+        setOrInsert(['command'], 'command', 1);
+      }
+    }
+
+    setOrInsert(['amount', 'sum', 'stake', 'value'], 'amount', queuedTrade.amount);
 
     if (queuedTrade.mode) {
       var mode = String(queuedTrade.mode).toLowerCase();
       if (mode === 'demo') {
-        updateFirstExistingKey(rewritten, ['isDemo', 'demo'], 1);
+        setOrInsert(['isDemo', 'demo'], 'isDemo', 1);
       }
       if (mode === 'live' || mode === 'real') {
-        updateFirstExistingKey(rewritten, ['isDemo', 'demo'], 0);
+        setOrInsert(['isDemo', 'demo'], 'isDemo', 0);
       }
-      updateFirstExistingKey(rewritten, ['accountMode', 'mode'], queuedTrade.mode);
+      setOrInsert(['accountMode', 'mode'], 'mode', queuedTrade.mode);
     }
 
     if (typeof queuedTrade.expiry !== 'undefined' && queuedTrade.expiry !== null) {
-      updateFirstExistingKey(rewritten, ['expiry', 'duration', 'expiration', 'timeframe'], queuedTrade.expiry);
+      setOrInsert(['expiry', 'duration', 'expiration', 'timeframe'], 'duration', queuedTrade.expiry);
     }
 
     return rewritten;

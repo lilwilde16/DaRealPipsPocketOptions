@@ -960,6 +960,9 @@ function initMoneyPrinterUI() {
 
     if (runBtn) {
       runBtn.addEventListener('click', function () {
+        if (!runtimeState.armed) {
+          post('setArmed', { armed: true });
+        }
         post('placeQueuedTradeNow');
         logLine('Requested run for queued trade.', true);
         setTimeout(refreshSnapshot, 180);
@@ -969,9 +972,11 @@ function initMoneyPrinterUI() {
     if (queueRunBtn) {
       queueRunBtn.addEventListener('click', function () {
         var trade = getTradeFromInputs(1);
-        post('enqueueTrade', { trade: trade });
-        setTimeout(function () { post('placeQueuedTradeNow'); }, 60);
-        logLine('Queue+Run request sent: ' + trade.asset + ' ' + trade.direction + ' ' + trade.amount, true);
+        if (!runtimeState.armed) {
+          post('setArmed', { armed: true });
+        }
+        post('placeSignalTrade', { trade: trade });
+        logLine('Direct signal trade request: ' + trade.asset + ' ' + trade.direction + ' ' + trade.amount, true);
         setTimeout(refreshSnapshot, 220);
       });
     }
@@ -1016,14 +1021,16 @@ function initMoneyPrinterUI() {
       m1Btn.addEventListener('click', function () {
         var multiplier = Math.max(1.1, num('mpb-tools-multi', 2));
         var baseTrade = getTradeFromInputs(1);
+        if (!runtimeState.armed) {
+          post('setArmed', { armed: true });
+        }
         martingaleRun = {
           active: true,
           baseTrade: baseTrade,
           multiplier: multiplier,
           startClosedCount: (runtimeState.tracker.closedOrders || []).length
         };
-        post('enqueueTrade', { trade: baseTrade });
-        setTimeout(function () { post('placeQueuedTradeNow'); }, 60);
+        post('placeSignalTrade', { trade: baseTrade });
         logLine('Martingale test started (step 1): ' + baseTrade.asset + ' ' + baseTrade.direction + ' ' + baseTrade.amount, true);
         setTimeout(refreshSnapshot, 240);
       });
@@ -1120,8 +1127,7 @@ function initMoneyPrinterUI() {
           if (typeof martingaleRun.baseTrade.expiry !== 'undefined') {
             step2.expiry = martingaleRun.baseTrade.expiry;
           }
-          post('enqueueTrade', { trade: step2 });
-          setTimeout(function () { post('placeQueuedTradeNow'); }, 60);
+          post('placeSignalTrade', { trade: step2 });
           logLine('Martingale step 2 fired after loss: amount ' + step2.amount, false);
         } else {
           logLine('Martingale step 2 skipped (step 1 pnl: ' + lastProfit.toFixed(2) + ')', true);
