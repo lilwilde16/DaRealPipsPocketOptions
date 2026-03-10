@@ -80,10 +80,21 @@
       var key = String(deal.id);
       var open = openOrders[key] || null;
 
+      var profit = Number(deal.profit);
+      if (!isFinite(profit) && deal.raw && typeof deal.raw === 'object') {
+        profit = Number(deal.raw.pnl);
+      }
+      if (!isFinite(profit) && deal.raw && typeof deal.raw === 'object') {
+        profit = Number(deal.raw.result);
+      }
+      if (!isFinite(profit) && deal.raw && typeof deal.raw === 'object') {
+        profit = Number(deal.raw.close_profit);
+      }
+
       var closed = {
         id: deal.id,
         amount: deal.amount,
-        profit: Number(deal.profit) || 0,
+        profit: isFinite(profit) ? profit : 0,
         command: deal.command,
         asset: deal.asset,
         closedAt: Date.now(),

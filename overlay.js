@@ -927,10 +927,6 @@ function initMoneyPrinterUI() {
       mode: val('mpb-tools-mode') || 'demo',
       strategyTag: val('mpb-tools-tag').trim() || 'compat-tools'
     };
-    var expiry = num('mpb-tools-expiry', NaN);
-    if (isFinite(expiry) && expiry > 0) {
-      trade.expiry = expiry;
-    }
     return trade;
   }
 
@@ -1065,7 +1061,6 @@ function initMoneyPrinterUI() {
       '</div>' +
       '<div class="mpb-row">' +
       '  <input id="mpb-tools-amount" type="number" step="0.01" value="1" placeholder="amount" />' +
-      '  <input id="mpb-tools-expiry" type="number" step="1" placeholder="expiry" />' +
       '</div>' +
       '<div class="mpb-row">' +
       '  <select id="mpb-tools-mode"><option value="demo">demo</option><option value="live">live</option></select>' +
@@ -1107,9 +1102,6 @@ function initMoneyPrinterUI() {
       mode: martingaleRun.baseTrade.mode,
       strategyTag: martingaleRun.baseTrade.strategyTag + '-m1'
     };
-    if (typeof martingaleRun.baseTrade.expiry !== 'undefined') {
-      step2.expiry = martingaleRun.baseTrade.expiry;
-    }
 
     post('placeSignalTrade', { trade: step2 });
     logLine('Martingale step 2 fired after loss: amount ' + step2.amount, false);

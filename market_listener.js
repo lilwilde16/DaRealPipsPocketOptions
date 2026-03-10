@@ -64,11 +64,16 @@
     if (serverEvent.eventName !== 'successopenOrder') {
       return null;
     }
+
     var body = serverEvent.body || {};
+    if (body && typeof body === 'object' && body.order && typeof body.order === 'object') {
+      body = body.order;
+    }
+
     return {
-      id: body.id,
-      amount: Number(body.amount),
-      asset: body.asset,
+      id: body.id || body.order_id || body.deal_id,
+      amount: Number(body.amount || body.sum || body.stake || body.value),
+      asset: body.asset || body.pair || body.symbol || body.instrument,
       raw: body
     };
   }
@@ -77,15 +82,50 @@
     if (serverEvent.eventName !== 'successcloseOrder') {
       return null;
     }
+
     var body = serverEvent.body || {};
-    var deals = Array.isArray(body.deals) ? body.deals : [];
+    var deals = [];
+
+    if (Array.isArray(body.deals)) {
+      deals = body.deals;
+    } else if (Array.isArray(body.orders)) {
+      deals = body.orders;
+    } else if (Array.isArray(body)) {
+      deals = body;
+    } else if (body && typeof body === 'object' && body.deal && typeof body.deal === 'object') {
+      deals = [body.deal];
+    } else if (body && typeof body === 'object' && body.order && typeof body.order === 'object') {
+      deals = [body.order];
+    } else if (body && typeof body === 'object') {
+      var hasSingleDealShape =
+        typeof body.id !== 'undefined' ||
+        typeof body.order_id !== 'undefined' ||
+        typeof body.deal_id !== 'undefined';
+      if (hasSingleDealShape) {
+        deals = [body];
+      }
+    }
+
     return deals.map(function mapClose(deal) {
+      var profit =
+        Number(deal.profit);
+
+      if (!isFinite(profit)) {
+        profit = Number(deal.pnl);
+      }
+      if (!isFinite(profit)) {
+        profit = Number(deal.result);
+      }
+      if (!isFinite(profit)) {
+        profit = Number(deal.close_profit);
+      }
+
       return {
-        id: deal.id,
-        amount: Number(deal.amount),
-        profit: Number(deal.profit),
-        command: deal.command,
-        asset: deal.asset,
+        id: deal.id || deal.order_id || deal.deal_id,
+        amount: Number(deal.amount || deal.sum || deal.stake || deal.value),
+        profit: isFinite(profit) ? profit : 0,
+        command: typeof deal.command !== 'undefined' ? deal.command : deal.action,
+        asset: deal.asset || deal.pair || deal.symbol || deal.instrument,
         raw: deal
       };
     });

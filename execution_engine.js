@@ -105,14 +105,66 @@
     return '';
   }
 
-  function getTradeBody(payload) {
-    if (Array.isArray(payload) && isObject(payload[1])) {
-      return payload[1];
+  function isKnownNonTradeName(name) {
+    return name === 'updatestream' ||
+      name === 'updatehistorynew' ||
+      name === 'updateassets' ||
+      name === 'successupdatebalance' ||
+      name === 'updateopeneddeals' ||
+      name === 'successcloseorder' ||
+      name === 'successopenorder' ||
+      name === 'upsignals' ||
+      name === 'signals/load' ||
+      name === 'signals/update' ||
+      name === 'updatesignalforecast';
+  }
+
+  function getTradeTarget(payload) {
+    var best = { target: null, score: 0 };
+
+    function scoreObject(obj) {
+      var amountScore = countPresentKeys(obj, ['amount', 'sum', 'stake', 'value']);
+      var assetScore = countPresentKeys(obj, ['asset', 'pair', 'symbol', 'instrument']);
+      var sideScore = countPresentKeys(obj, ['action', 'direction', 'side', 'command']);
+      return amountScore + assetScore + sideScore;
     }
-    if (isObject(payload)) {
-      return payload;
+
+    function walk(node) {
+      if (Array.isArray(node)) {
+        for (var i = 0; i < node.length; i += 1) {
+          walk(node[i]);
+        }
+        return;
+      }
+
+      if (!isObject(node)) {
+        return;
+      }
+
+      var score = scoreObject(node);
+      if (score > best.score) {
+        best.target = node;
+        best.score = score;
+      }
+
+      var keys = Object.keys(node);
+      for (var k = 0; k < keys.length; k += 1) {
+        walk(node[keys[k]]);
+      }
     }
-    return null;
+
+    walk(payload);
+
+    if (!best.target && isObject(payload)) {
+      best.target = payload;
+    }
+
+    if (!best.target && Array.isArray(payload) && !isObject(payload[1])) {
+      payload[1] = {};
+      best.target = payload[1];
+    }
+
+    return best;
   }
 
   function countPresentKeys(obj, keys) {
@@ -134,50 +186,17 @@
     }
 
     var name = String(eventName(payload) || '').toLowerCase();
-    var body = getTradeBody(payload);
-
-    var knownNonTrade = {
-      updatestream: true,
-      updatehistorynew: true,
-      updateassets: true,
-      successupdatebalance: true,
-      updateopeneddeals: true,
-      successcloseorder: true,
-      successopenorder: true,
-      upsignals: true,
-      'signals/load': true,
-      'signals/update': true,
-      updatesignalforecast: true
-    };
+    var targetInfo = getTradeTarget(payload);
 
     if (name.indexOf('openorder') >= 0 || name.indexOf('trade') >= 0 || name.indexOf('deal') >= 0) {
       return true;
     }
 
-    if (name && knownNonTrade[name]) {
+    if (name && isKnownNonTradeName(name)) {
       return false;
     }
 
-    if (body) {
-      var amountScore = countPresentKeys(body, ['amount', 'sum', 'stake', 'value']);
-      var assetScore = countPresentKeys(body, ['asset', 'pair', 'symbol', 'instrument']);
-      var sideScore = countPresentKeys(body, ['action', 'direction', 'side', 'command']);
-      if ((amountScore + assetScore + sideScore) >= 2) {
-        return true;
-      }
-    }
-
-    if (Array.isArray(payload) && isObject(payload[1])) {
-      var p = payload[1];
-      if ((hasOwn(p, 'amount') || hasOwn(p, 'sum') || hasOwn(p, 'stake')) &&
-          (hasOwn(p, 'asset') || hasOwn(p, 'pair') || hasOwn(p, 'symbol'))) {
-        return true;
-      }
-    }
-
-    if (isObject(payload) &&
-        (hasOwn(payload, 'amount') || hasOwn(payload, 'sum') || hasOwn(payload, 'stake')) &&
-        (hasOwn(payload, 'asset') || hasOwn(payload, 'pair') || hasOwn(payload, 'symbol'))) {
+    if (targetInfo && targetInfo.score >= 2) {
       return true;
     }
 
@@ -187,16 +206,22 @@
   function rewriteTradeRequest(payload, queuedTrade) {
     var rewritten = deepClone(payload);
     var normalizedDirection = normalizeDirection(queuedTrade.direction);
-    var body = getTradeBody(rewritten);
+    var targetInfo = getTradeTarget(rewritten);
+    var body = targetInfo ? targetInfo.target : null;
+    var touched = false;
 
     if (!body || typeof body !== 'object') {
-      return rewritten;
+      return { payload: rewritten, touched: false };
     }
 
     function setOrInsert(keys, fallbackKey, value) {
       var changed = updateFirstExistingKey(body, keys, value);
+      if (changed) {
+        touched = true;
+      }
       if (!changed && fallbackKey) {
         body[fallbackKey] = value;
+        touched = true;
       }
     }
 
@@ -228,7 +253,7 @@
       setOrInsert(['expiry', 'duration', 'expiration', 'timeframe'], 'duration', queuedTrade.expiry);
     }
 
-    return rewritten;
+    return { payload: rewritten, touched: touched };
   }
 
   function findNativeTradeFunction() {
@@ -339,14 +364,19 @@
       return undefined;
     }
 
+    var rewriteProbe = rewriteTradeRequest(ctx.parsed, candidate);
+    if (!rewriteProbe.touched) {
+      log('rewrite.skip.no_target', {});
+      return undefined;
+    }
+
     var consumed = queue.consumeTrade();
-    var rewrittenPayload = rewriteTradeRequest(ctx.parsed, consumed);
-    var rewrittenRaw = bridge.serializePayload(rewrittenPayload, ctx.parseMeta);
+    var rewrittenRaw = bridge.serializePayload(rewriteProbe.payload, ctx.parseMeta);
 
     waitingForSiteOrder = false;
     tracker.registerPendingTrade({
       queueTrade: consumed,
-      raw: rewrittenPayload
+      raw: rewriteProbe.payload
     });
 
     log('rewrite.success', {
