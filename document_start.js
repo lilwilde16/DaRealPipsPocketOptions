@@ -5,8 +5,8 @@
   window.__MPB_ENGINE_INJECTED__ = true;
 
   var scripts = [
-    "web_accessible_resources.js",
     "websocket_bridge.js",
+    "web_accessible_resources.js",
     "trade_queue.js",
     "market_listener.js",
     "order_tracker.js",

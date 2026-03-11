@@ -606,6 +606,16 @@
         detail: bridgeChecks.hasBridge ? 'WebSocket bridge patched.' : 'WebSocket bridge is not available.'
       },
       {
+        id: 'socket_open',
+        ok: bridgeChecks.socketOpen > 0,
+        detail: 'Socket open events seen: ' + bridgeChecks.socketOpen + ' (close=' + bridgeChecks.socketClose + ', errors=' + bridgeChecks.socketErrors + ')'
+      },
+      {
+        id: 'parse_failures',
+        ok: bridgeChecks.parseFailed === 0,
+        detail: 'Inbound parse failures: ' + bridgeChecks.parseFailed
+      },
+      {
         id: 'stream_events',
         ok: diagnostics.streamEvents > 0,
         detail: 'Stream events seen: ' + diagnostics.streamEvents

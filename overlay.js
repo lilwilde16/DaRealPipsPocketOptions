@@ -1292,6 +1292,7 @@ function initMoneyPrinterUI() {
   var lastBacktest = null;
   var lastMarketBacktest = null;
   var lastChartProbe = null;
+  var deepProbeState = null;
 
   function post(act, extra) {
     var payload = { belobot: true, act: act };
@@ -1602,6 +1603,8 @@ function initMoneyPrinterUI() {
 
       html +=
         '<div><b>Deep Backtest Test</b> (' + new Date(lastChartProbe.finishedAt).toLocaleTimeString() + ')</div>' +
+        '<div>Mode: <b>' + (lastChartProbe.probeMode || 'single-snapshot') + '</b></div>' +
+        '<div>Probe attempts: <b>' + (lastChartProbe.probeAttempts || 1) + '</b> | Elapsed: <b>' + (lastChartProbe.probeElapsedSec || 0) + 's</b></div>' +
         '<div>Verdict: <b>' + readyText + '</b> - ' + readyReason + '</div>' +
         '<div>Request: <b>' + (lastChartProbe.requestedAsset || 'n/a') + '</b> [' + (lastChartProbe.requestedAssetKey || 'n/a') + ']</div>' +
         '<div>Resolved: <b>' + (lastChartProbe.resolvedAsset || 'n/a') + '</b> [' + (lastChartProbe.resolvedAssetKey || 'n/a') + '] | Points total/window: <b>' + lastChartProbe.pointsForResolvedAsset + '/' + lastChartProbe.pointsInWindow + '</b> (need >= ' + (lastChartProbe.minPointsRequired || 0) + ')</div>' +
@@ -1701,7 +1704,6 @@ function initMoneyPrinterUI() {
   }
 
   function runChartProbe() {
-    applyPairFilters();
     var timeWindow = getSelectedTimeWindow();
 
     post('maChartProbeRun', {
@@ -1711,6 +1713,65 @@ function initMoneyPrinterUI() {
         toTs: timeWindow.toTs
       }
     });
+  }
+
+  function stopDeepProbe() {
+    if (deepProbeState && deepProbeState.timerId) {
+      clearInterval(deepProbeState.timerId);
+    }
+    deepProbeState = null;
+  }
+
+  function runDeepBacktestTest() {
+    stopDeepProbe();
+    applyPairFilters();
+    post('runtimeSnapshot');
+
+    var now = Date.now();
+    var timeoutMs = 12000;
+    deepProbeState = {
+      startedAt: now,
+      timeoutAt: now + timeoutMs,
+      attempts: 0,
+      timerId: null
+    };
+
+    lastChartProbe = {
+      requestedAsset: pickBacktestAsset(),
+      requestedAssetKey: '',
+      resolvedAsset: '',
+      resolvedAssetKey: '',
+      minPointsRequired: 0,
+      pointsForResolvedAsset: 0,
+      pointsInWindow: 0,
+      firstPointTs: 0,
+      lastPointTs: 0,
+      ageMs: null,
+      verdict: { ready: false },
+      recommendations: ['Deep test running... waiting for live feed samples.'],
+      chartGlobals: [],
+      checks: [],
+      overallOk: false,
+      probeMode: 'active-12s',
+      probeAttempts: 0,
+      probeElapsedSec: 0,
+      finishedAt: now
+    };
+    renderBacktestResult();
+
+    function tickProbe() {
+      if (!deepProbeState) return;
+      deepProbeState.attempts += 1;
+      post('runtimeSnapshot');
+      runChartProbe();
+
+      if (Date.now() >= deepProbeState.timeoutAt) {
+        stopDeepProbe();
+      }
+    }
+
+    tickProbe();
+    deepProbeState.timerId = setInterval(tickProbe, 1000);
   }
 
   function render() {
@@ -1896,11 +1957,11 @@ function initMoneyPrinterUI() {
       });
 
       card.querySelector('#mpb-bt-probe').addEventListener('click', function () {
-        post('runtimeSnapshot');
-        runChartProbe();
+        runDeepBacktestTest();
       });
 
       card.querySelector('#mpb-bt-probe-clear').addEventListener('click', function () {
+        stopDeepProbe();
         lastChartProbe = null;
         renderBacktestResult();
       });
@@ -1987,6 +2048,29 @@ function initMoneyPrinterUI() {
     }
 
     if (d.act === 'maChartProbeResult' && d.result && typeof d.result === 'object') {
+      var attempts = 1;
+      var elapsedSec = 0;
+      var mode = 'single-snapshot';
+      var recs = Array.isArray(d.result.recommendations) ? d.result.recommendations.slice() : [];
+
+      if (deepProbeState) {
+        attempts = deepProbeState.attempts;
+        elapsedSec = Math.max(0, Math.round((Date.now() - deepProbeState.startedAt) / 1000));
+        mode = 'active-12s';
+
+        var verdict = d.result.verdict && typeof d.result.verdict === 'object' ? d.result.verdict : {};
+        var timedOut = Date.now() >= deepProbeState.timeoutAt;
+        if (verdict.ready) {
+          recs.unshift('Deep test reached READY in ' + elapsedSec + 's.');
+          stopDeepProbe();
+        } else if (timedOut) {
+          recs.unshift('Deep test timed out after 12s without reaching READY.');
+          stopDeepProbe();
+        } else {
+          recs.unshift('Deep test in progress... ' + Math.max(0, Math.ceil((deepProbeState.timeoutAt - Date.now()) / 1000)) + 's remaining.');
+        }
+      }
+
       lastChartProbe = {
         requestedAsset: d.result.requestedAsset || '',
         requestedAssetKey: d.result.requestedAssetKey || '',
@@ -1999,10 +2083,13 @@ function initMoneyPrinterUI() {
         lastPointTs: Number(d.result.lastPointTs) || 0,
         ageMs: (typeof d.result.ageMs === 'number' && isFinite(d.result.ageMs)) ? d.result.ageMs : null,
         verdict: d.result.verdict && typeof d.result.verdict === 'object' ? d.result.verdict : {},
-        recommendations: Array.isArray(d.result.recommendations) ? d.result.recommendations : [],
+        recommendations: recs,
         chartGlobals: Array.isArray(d.result.chartGlobals) ? d.result.chartGlobals : [],
         checks: Array.isArray(d.result.checks) ? d.result.checks : [],
         overallOk: !!d.result.overallOk,
+        probeMode: mode,
+        probeAttempts: attempts,
+        probeElapsedSec: elapsedSec,
         finishedAt: Date.now()
       };
       renderBacktestResult();
