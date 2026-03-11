@@ -181,7 +181,8 @@
           started: !!state.settings.started,
           queueSize: queue.size(),
           queuedTrades: queue.listTrades(),
-          tracker: tracker.getSnapshot()
+          tracker: tracker.getSnapshot(),
+          settings: JSON.parse(JSON.stringify(state.settings))
         }
       }, window.location.href);
       evt.stopImmediatePropagation();
