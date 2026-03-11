@@ -1280,10 +1280,12 @@ function initMoneyPrinterUI() {
     lastPrice: null,
     lastSignalAt: 0,
     lastSignalDir: '',
+    lastAssetKey: '',
     feedAliveAt: 0,
     historyPoints: 0,
     historyAssets: 0,
-    historyUpdatedAt: 0
+    historyUpdatedAt: 0,
+    historySummary: []
   };
   var lastBacktest = null;
   var lastMarketBacktest = null;
@@ -1503,11 +1505,19 @@ function initMoneyPrinterUI() {
     var html = '';
 
     if (lastMarketBacktest) {
+      var availableText = 'none';
+      if (Array.isArray(lastMarketBacktest.availableAssets) && lastMarketBacktest.availableAssets.length) {
+        availableText = lastMarketBacktest.availableAssets.map(function mapAsset(a) {
+          return (a.asset || a.key || 'n/a') + ':' + (Number(a.points) || 0);
+        }).join(', ');
+      }
       html +=
         '<div><b>Market Data Backtest</b> (' + new Date(lastMarketBacktest.finishedAt).toLocaleTimeString() + ')</div>' +
-        '<div>Asset: <b>' + (lastMarketBacktest.asset || 'n/a') + '</b> | MA: <b>' + lastMarketBacktest.fastPeriod + '/' + lastMarketBacktest.slowPeriod + '</b> | Points: <b>' + lastMarketBacktest.pointsUsed + '</b></div>' +
+        '<div>Request: <b>' + (lastMarketBacktest.requestedAsset || 'n/a') + '</b> [' + (lastMarketBacktest.requestedAssetKey || 'n/a') + ']</div>' +
+        '<div>Resolved: <b>' + (lastMarketBacktest.asset || 'n/a') + '</b> [' + (lastMarketBacktest.assetKey || 'n/a') + '] | MA: <b>' + lastMarketBacktest.fastPeriod + '/' + lastMarketBacktest.slowPeriod + '</b> | Points: <b>' + lastMarketBacktest.pointsUsed + '</b></div>' +
         '<div>Signals: <b>' + lastMarketBacktest.sampleSize + '</b> | Wins: <b>' + lastMarketBacktest.wins + '</b> | Losses: <b>' + lastMarketBacktest.losses + '</b> | Draws: <b>' + lastMarketBacktest.draws + '</b></div>' +
-        '<div>Win Rate: <b>' + lastMarketBacktest.accuracy.toFixed(2) + '%</b> | PnL: <b>' + (lastMarketBacktest.pnl >= 0 ? '+' : '') + lastMarketBacktest.pnl.toFixed(2) + '</b></div>';
+        '<div>Win Rate: <b>' + lastMarketBacktest.accuracy.toFixed(2) + '%</b> | PnL: <b>' + (lastMarketBacktest.pnl >= 0 ? '+' : '') + lastMarketBacktest.pnl.toFixed(2) + '</b></div>' +
+        '<div>Available history assets (points): <b>' + availableText + '</b></div>';
     }
 
     if (lastBacktest) {
@@ -1628,10 +1638,17 @@ function initMoneyPrinterUI() {
     var lastSignalText = maStatus.lastSignalAt
       ? (new Date(maStatus.lastSignalAt).toLocaleTimeString() + ' ' + (maStatus.lastSignalDir || ''))
       : 'none yet';
+    var historySummaryText = 'none yet';
+    if (Array.isArray(maStatus.historySummary) && maStatus.historySummary.length) {
+      historySummaryText = maStatus.historySummary.map(function mapItem(item) {
+        return (item.asset || item.key || 'n/a') + ':' + (Number(item.points) || 0);
+      }).join(', ');
+    }
     desc.innerHTML =
       '<div><b>Strategy:</b> MA crossover enters <b>CALL</b> when fast MA crosses above slow MA, and <b>PUT</b> on opposite crossover.</div>' +
       '<div><b>Live config:</b> fast=' + runtimeSettings.maFast + ', slow=' + runtimeSettings.maSlow + ', amount=' + Number(runtimeSettings.maAmount || 1).toFixed(2) + ', pair=' + pairText + ', cooldown=' + runtimeSettings.maCooldownMs + 'ms.</div>' +
-      '<div><b>Feed status:</b> ' + feedText + ' | ticks=' + maStatus.ticks + ' | signals=' + maStatus.signals + ' | history points=' + maStatus.historyPoints + ' (' + maStatus.historyAssets + ' assets) | last signal=' + lastSignalText + '</div>' +
+      '<div><b>Feed status:</b> ' + feedText + ' | ticks=' + maStatus.ticks + ' | signals=' + maStatus.signals + ' | last asset=' + (maStatus.lastAsset || 'n/a') + ' [' + (maStatus.lastAssetKey || 'n/a') + '] | last signal=' + lastSignalText + '</div>' +
+      '<div><b>History buckets:</b> total points=' + maStatus.historyPoints + ' (' + maStatus.historyAssets + ' assets) | ' + historySummaryText + '</div>' +
       '<div><b>How far to backtest:</b> set <b>Lookback Trades</b> (currently ' + lookback + ') and optional <b>From/To Date-Time</b>. Current filter: <b>' + rangeText + '</b>.</div>';
 
     stats.innerHTML =
@@ -1780,7 +1797,10 @@ function initMoneyPrinterUI() {
     if (d.act === 'maBacktestResult' && d.result && typeof d.result === 'object') {
       lastMarketBacktest = {
         strategy: d.result.strategy || 'ma-crossover',
+        requestedAsset: d.result.requestedAsset || '',
+        requestedAssetKey: d.result.requestedAssetKey || '',
         asset: d.result.asset || '',
+        assetKey: d.result.assetKey || '',
         fastPeriod: Number(d.result.fastPeriod) || runtimeSettings.maFast,
         slowPeriod: Number(d.result.slowPeriod) || runtimeSettings.maSlow,
         pointsUsed: Number(d.result.pointsUsed) || 0,
@@ -1792,6 +1812,7 @@ function initMoneyPrinterUI() {
         pnl: Number(d.result.pnl) || 0,
         firstTs: Number(d.result.firstTs) || Date.now(),
         lastTs: Number(d.result.lastTs) || Date.now(),
+        availableAssets: Array.isArray(d.result.availableAssets) ? d.result.availableAssets : [],
         finishedAt: Date.now()
       };
       renderBacktestResult();
@@ -1806,10 +1827,12 @@ function initMoneyPrinterUI() {
         lastPrice: Number(d.status.lastPrice),
         lastSignalAt: Number(d.status.lastSignalAt) || 0,
         lastSignalDir: d.status.lastSignalDir || '',
+        lastAssetKey: d.status.lastAssetKey || '',
         feedAliveAt: Number(d.status.feedAliveAt) || 0,
         historyPoints: Number(d.status.historyPoints) || 0,
         historyAssets: Number(d.status.historyAssets) || 0,
-        historyUpdatedAt: Number(d.status.historyUpdatedAt) || 0
+        historyUpdatedAt: Number(d.status.historyUpdatedAt) || 0,
+        historySummary: Array.isArray(d.status.historySummary) ? d.status.historySummary : []
       };
       render();
     }

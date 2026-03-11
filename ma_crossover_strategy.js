@@ -13,6 +13,7 @@
 
   var pricesByAsset = {};
   var historyByAsset = {};
+  var assetLabelsByKey = {};
   var lastRelationByAsset = {};
   var lastSignalAtByAsset = {};
   var lastTickFingerprintByAsset = {};
@@ -23,10 +24,12 @@
     lastPrice: null,
     lastSignalAt: 0,
     lastSignalDir: '',
+    lastAssetKey: '',
     feedAliveAt: 0,
     historyPoints: 0,
     historyAssets: 0,
-    historyUpdatedAt: 0
+    historyUpdatedAt: 0,
+    historySummary: []
   };
 
   var cfg = {
@@ -44,6 +47,37 @@
     return d;
   }
 
+  function assetKey(asset) {
+    return String(asset || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  function rememberAssetLabel(rawAsset) {
+    var raw = String(rawAsset || '').trim();
+    var key = assetKey(raw);
+    if (!key) return '';
+    if (raw && !assetLabelsByKey[key]) {
+      assetLabelsByKey[key] = raw;
+    }
+    return key;
+  }
+
+  function resolveAssetKey(rawAsset) {
+    var key = rememberAssetLabel(rawAsset);
+    if (!key) return '';
+    if (historyByAsset[key] || pricesByAsset[key]) return key;
+
+    var keys = Object.keys(historyByAsset);
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i] === key || keys[i].indexOf(key) >= 0 || key.indexOf(keys[i]) >= 0) {
+        return keys[i];
+      }
+    }
+    return key;
+  }
+
   function postInfo(text) {
     window.postMessage({ belobot: true, info_text: text }, window.location.href);
   }
@@ -51,11 +85,28 @@
   function postStatus() {
     var assets = Object.keys(historyByAsset);
     var points = 0;
+    var summary = [];
     for (var i = 0; i < assets.length; i++) {
-      points += (historyByAsset[assets[i]] || []).length;
+      var key = assets[i];
+      var arr = historyByAsset[key] || [];
+      var count = arr.length;
+      points += count;
+      summary.push({
+        key: key,
+        asset: assetLabelsByKey[key] || key,
+        points: count,
+        lastTs: count ? Number(arr[count - 1].ts) || 0 : 0
+      });
     }
+
+    summary.sort(function sortByPoints(a, b) {
+      if (b.points !== a.points) return b.points - a.points;
+      return (b.lastTs || 0) - (a.lastTs || 0);
+    });
+
     status.historyAssets = assets.length;
     status.historyPoints = points;
+    status.historySummary = summary.slice(0, 12);
 
     window.postMessage({
       belobot: true,
@@ -67,10 +118,12 @@
         lastPrice: status.lastPrice,
         lastSignalAt: status.lastSignalAt,
         lastSignalDir: status.lastSignalDir,
+        lastAssetKey: status.lastAssetKey,
         feedAliveAt: status.feedAliveAt,
         historyPoints: status.historyPoints,
         historyAssets: status.historyAssets,
         historyUpdatedAt: status.historyUpdatedAt,
+        historySummary: status.historySummary,
         config: {
           fastPeriod: cfg.fastPeriod,
           slowPeriod: cfg.slowPeriod,
@@ -106,8 +159,10 @@
   }
 
   function pushPrice(asset, price) {
-    if (!pricesByAsset[asset]) pricesByAsset[asset] = [];
-    var arr = pricesByAsset[asset];
+    var key = rememberAssetLabel(asset);
+    if (!key) return;
+    if (!pricesByAsset[key]) pricesByAsset[key] = [];
+    var arr = pricesByAsset[key];
     arr.push(price);
     if (arr.length > Math.max(cfg.slowPeriod + 10, 80)) {
       arr.shift();
@@ -115,9 +170,10 @@
   }
 
   function pushHistoryPoint(asset, ts, close) {
-    if (!asset) return;
-    if (!historyByAsset[asset]) historyByAsset[asset] = [];
-    var arr = historyByAsset[asset];
+    var key = rememberAssetLabel(asset);
+    if (!key) return;
+    if (!historyByAsset[key]) historyByAsset[key] = [];
+    var arr = historyByAsset[key];
     var t = Number(ts) || Date.now();
     var c = Number(close);
     if (!isFinite(c)) return;
@@ -196,64 +252,69 @@
 
   function shouldTradeAsset(asset) {
     if (!cfg.pair) return true;
-    var a = String(asset || '').toLowerCase();
-    var p = String(cfg.pair || '').toLowerCase();
-    return a === p || a.indexOf(p) >= 0 || p.indexOf(a) >= 0;
+    var a = assetKey(asset);
+    var p = assetKey(cfg.pair || '');
+    return !!a && !!p && (a === p || a.indexOf(p) >= 0 || p.indexOf(a) >= 0);
   }
 
   function tradeFromCross(asset, relation) {
+    var key = resolveAssetKey(asset);
+    if (!key) return;
     var now = Date.now();
-    var lastTs = Number(lastSignalAtByAsset[asset]) || 0;
+    var lastTs = Number(lastSignalAtByAsset[key]) || 0;
     if (now - lastTs < cfg.cooldownMs) return;
 
     var direction = relation === 'above' ? 'call' : 'put';
 
     execution.placeSignalTrade({
-      asset: asset,
+      asset: assetLabelsByKey[key] || key,
       direction: normalizeDir(direction),
       amount: cfg.amount,
       strategyTag: 'ma-crossover'
     });
 
-    lastSignalAtByAsset[asset] = now;
+    lastSignalAtByAsset[key] = now;
     status.signals += 1;
     status.lastSignalAt = now;
     status.lastSignalDir = direction;
-    postInfo('MA crossover signal: ' + asset + ' ' + direction + ' @ ' + cfg.amount.toFixed(2));
+    postInfo('MA crossover signal: ' + (assetLabelsByKey[key] || key) + ' ' + direction + ' @ ' + cfg.amount.toFixed(2));
     postStatus();
   }
 
   function onTick(asset, price, ts) {
-    if (!shouldTradeAsset(asset)) return;
+    var key = resolveAssetKey(asset);
+    if (!key) return;
+    if (!shouldTradeAsset(assetLabelsByKey[key] || key)) return;
 
     var tickTs = Number(ts) || Date.now();
     var fp = String(tickTs) + '|' + String(price);
-    if (lastTickFingerprintByAsset[asset] === fp) {
+    if (lastTickFingerprintByAsset[key] === fp) {
       return;
     }
-    lastTickFingerprintByAsset[asset] = fp;
+    lastTickFingerprintByAsset[key] = fp;
 
     status.ticks += 1;
     status.feedAliveAt = Date.now();
-    status.lastAsset = asset;
+    status.lastAsset = assetLabelsByKey[key] || key;
+    status.lastAssetKey = key;
     status.lastPrice = Number(price) || 0;
 
-    pushPrice(asset, price);
-    pushHistoryPoint(asset, tickTs, price);
+    pushPrice(key, price);
+    pushHistoryPoint(key, tickTs, price);
 
-    var arr = pricesByAsset[asset];
+    var arr = pricesByAsset[key];
     var fast = sma(arr, cfg.fastPeriod);
     var slow = sma(arr, cfg.slowPeriod);
     if (!isFinite(fast) || !isFinite(slow)) return;
 
     var relation = fast >= slow ? 'above' : 'below';
-    var prev = lastRelationByAsset[asset] || null;
-    lastRelationByAsset[asset] = relation;
+    var prev = lastRelationByAsset[key] || null;
+    lastRelationByAsset[key] = relation;
 
     if (!prev || prev === relation) return;
     if (!isEnabled()) return;
 
-    tradeFromCross(asset, relation);
+    tradeFromCross(key, relation);
   }
 
   function extractTicks(payload) {
@@ -326,9 +387,9 @@
   function runMarketBacktest(params) {
     refreshConfig();
 
-    var asset = (params && params.asset) ? String(params.asset) : '';
-    if (!asset) {
-      asset = cfg.pair || status.lastAsset || '';
+    var requestedAsset = (params && params.asset) ? String(params.asset) : '';
+    if (!requestedAsset) {
+      requestedAsset = cfg.pair || status.lastAsset || '';
     }
 
     var fast = Math.max(2, Math.floor(Number(params && params.fastPeriod) || cfg.fastPeriod));
@@ -348,12 +409,21 @@
     }
 
     var allAssets = Object.keys(historyByAsset);
-    var targetAsset = asset;
-    if (!targetAsset && allAssets.length) {
-      targetAsset = allAssets[0];
+    var targetKey = resolveAssetKey(requestedAsset);
+    if (!targetKey || !historyByAsset[targetKey]) {
+      var requestedKey = assetKey(requestedAsset);
+      for (var i = 0; i < allAssets.length; i++) {
+        if (allAssets[i] === requestedKey || allAssets[i].indexOf(requestedKey) >= 0 || requestedKey.indexOf(allAssets[i]) >= 0) {
+          targetKey = allAssets[i];
+          break;
+        }
+      }
+    }
+    if ((!targetKey || !historyByAsset[targetKey]) && allAssets.length) {
+      targetKey = allAssets[0];
     }
 
-    var seriesRaw = historyByAsset[targetAsset] || [];
+    var seriesRaw = historyByAsset[targetKey] || [];
     var series = seriesRaw.filter(function filterTs(point) {
       if (!point) return false;
       if (fromTs !== null && point.ts < fromTs) return false;
@@ -422,7 +492,10 @@
 
     return {
       strategy: 'ma-crossover',
-      asset: targetAsset || '',
+      requestedAsset: requestedAsset || '',
+      requestedAssetKey: assetKey(requestedAsset),
+      asset: targetKey ? (assetLabelsByKey[targetKey] || targetKey) : '',
+      assetKey: targetKey || '',
       fastPeriod: fast,
       slowPeriod: slow,
       baseAmount: base,
@@ -439,6 +512,18 @@
       pnl: pnl,
       firstTs: series.length ? series[0].ts : Date.now(),
       lastTs: series.length ? series[series.length - 1].ts : Date.now(),
+      availableAssets: allAssets.map(function mapAsset(key) {
+        var arr = historyByAsset[key] || [];
+        return {
+          key: key,
+          asset: assetLabelsByKey[key] || key,
+          points: arr.length,
+          lastTs: arr.length ? Number(arr[arr.length - 1].ts) || 0 : 0
+        };
+      }).sort(function sortAssets(a, b) {
+        if (b.points !== a.points) return b.points - a.points;
+        return (b.lastTs || 0) - (a.lastTs || 0);
+      }).slice(0, 12),
       recentSignals: signals.slice(Math.max(0, signals.length - 20))
     };
   }
@@ -500,10 +585,12 @@
         lastPrice: status.lastPrice,
         lastSignalAt: status.lastSignalAt,
         lastSignalDir: status.lastSignalDir,
+        lastAssetKey: status.lastAssetKey,
         feedAliveAt: status.feedAliveAt,
         historyPoints: status.historyPoints,
         historyAssets: status.historyAssets,
-        historyUpdatedAt: status.historyUpdatedAt
+        historyUpdatedAt: status.historyUpdatedAt,
+        historySummary: Array.isArray(status.historySummary) ? status.historySummary.slice() : []
       };
     },
     runMarketBacktest: runMarketBacktest,
