@@ -1280,9 +1280,13 @@ function initMoneyPrinterUI() {
     lastPrice: null,
     lastSignalAt: 0,
     lastSignalDir: '',
-    feedAliveAt: 0
+    feedAliveAt: 0,
+    historyPoints: 0,
+    historyAssets: 0,
+    historyUpdatedAt: 0
   };
   var lastBacktest = null;
+  var lastMarketBacktest = null;
 
   function post(act, extra) {
     var payload = { belobot: true, act: act };
@@ -1491,22 +1495,36 @@ function initMoneyPrinterUI() {
     var out = document.getElementById('mpb-bt-result');
     if (!out) return;
 
-    if (!lastBacktest) {
+    if (!lastBacktest && !lastMarketBacktest) {
       out.innerHTML = '<div>No backtest started yet. Set inputs and click <b>Start Backtest</b>.</div>';
       return;
     }
 
-    var summary = lastBacktest.summary;
-    var sim = lastBacktest.sim;
-    var rangeLabel = lastBacktest.timeRangeLabel || 'all loaded times';
-    out.innerHTML =
-      '<div><b>Backtest End Result</b> (' + new Date(lastBacktest.finishedAt).toLocaleTimeString() + ')</div>' +
-      '<div>Strategy: <b>' + lastBacktest.strategy + '</b> | Range: <b>last ' + lastBacktest.lookback + '</b> closes (used ' + lastBacktest.sampleSize + ')</div>' +
-      '<div>Date/Time Filter: <b>' + rangeLabel + '</b></div>' +
-      '<div>Period: <b>' + new Date(lastBacktest.firstTs).toLocaleTimeString() + '</b> to <b>' + new Date(lastBacktest.lastTs).toLocaleTimeString() + '</b></div>' +
-      '<div>Win Rate: <b>' + summary.accuracy.toFixed(2) + '%</b> | Real PnL: <b>' + (summary.pnl >= 0 ? '+' : '') + summary.pnl.toFixed(2) + '</b></div>' +
-      '<div>Sim PnL: <b>' + (sim.simPnl >= 0 ? '+' : '') + sim.simPnl.toFixed(2) + '</b> | Sim Max Depth: <b>' + sim.maxDepth + '</b> | Stops at max steps: <b>' + sim.cycleStops + '</b></div>' +
-      '<div>Execution Match: <b>' + summary.execPass + '/' + summary.execChecks + '</b> (' + summary.execAccuracy.toFixed(2) + '%)</div>';
+    var html = '';
+
+    if (lastMarketBacktest) {
+      html +=
+        '<div><b>Market Data Backtest</b> (' + new Date(lastMarketBacktest.finishedAt).toLocaleTimeString() + ')</div>' +
+        '<div>Asset: <b>' + (lastMarketBacktest.asset || 'n/a') + '</b> | MA: <b>' + lastMarketBacktest.fastPeriod + '/' + lastMarketBacktest.slowPeriod + '</b> | Points: <b>' + lastMarketBacktest.pointsUsed + '</b></div>' +
+        '<div>Signals: <b>' + lastMarketBacktest.sampleSize + '</b> | Wins: <b>' + lastMarketBacktest.wins + '</b> | Losses: <b>' + lastMarketBacktest.losses + '</b> | Draws: <b>' + lastMarketBacktest.draws + '</b></div>' +
+        '<div>Win Rate: <b>' + lastMarketBacktest.accuracy.toFixed(2) + '%</b> | PnL: <b>' + (lastMarketBacktest.pnl >= 0 ? '+' : '') + lastMarketBacktest.pnl.toFixed(2) + '</b></div>';
+    }
+
+    if (lastBacktest) {
+      var summary = lastBacktest.summary;
+      var sim = lastBacktest.sim;
+      var rangeLabel = lastBacktest.timeRangeLabel || 'all loaded times';
+      html +=
+        '<div style="margin-top:6px;"><b>Execution Backtest (Closed Orders)</b></div>' +
+        '<div>Strategy: <b>' + lastBacktest.strategy + '</b> | Range: <b>last ' + lastBacktest.lookback + '</b> closes (used ' + lastBacktest.sampleSize + ')</div>' +
+        '<div>Date/Time Filter: <b>' + rangeLabel + '</b></div>' +
+        '<div>Period: <b>' + new Date(lastBacktest.firstTs).toLocaleTimeString() + '</b> to <b>' + new Date(lastBacktest.lastTs).toLocaleTimeString() + '</b></div>' +
+        '<div>Win Rate: <b>' + summary.accuracy.toFixed(2) + '%</b> | Real PnL: <b>' + (summary.pnl >= 0 ? '+' : '') + summary.pnl.toFixed(2) + '</b></div>' +
+        '<div>Sim PnL: <b>' + (sim.simPnl >= 0 ? '+' : '') + sim.simPnl.toFixed(2) + '</b> | Sim Max Depth: <b>' + sim.maxDepth + '</b> | Stops at max steps: <b>' + sim.cycleStops + '</b></div>' +
+        '<div>Execution Match: <b>' + summary.execPass + '/' + summary.execChecks + '</b> (' + summary.execAccuracy.toFixed(2) + '%)</div>';
+    }
+
+    out.innerHTML = html;
   }
 
   function runBacktest() {
@@ -1517,6 +1535,19 @@ function initMoneyPrinterUI() {
     var maxSteps = Math.max(1, Math.floor(Number(document.getElementById('mpb-bt-steps').value) || 2));
     var lookback = Math.max(10, Math.floor(Number(document.getElementById('mpb-bt-lookback').value) || 200));
     var timeWindow = getSelectedTimeWindow();
+
+    post('maBacktestRun', {
+      params: {
+        asset: runtimeSettings.maPair || maStatus.lastAsset || '',
+        fastPeriod: runtimeSettings.maFast,
+        slowPeriod: runtimeSettings.maSlow,
+        baseAmount: baseAmount,
+        payoutPct: payoutPct,
+        lookback: lookback,
+        fromTs: timeWindow.fromTs,
+        toTs: timeWindow.toTs
+      }
+    });
 
     var filtered = getFilteredEvents(strategy, timeWindow.fromTs, timeWindow.toTs);
     var sample = filtered.slice(Math.max(0, filtered.length - lookback));
@@ -1600,7 +1631,7 @@ function initMoneyPrinterUI() {
     desc.innerHTML =
       '<div><b>Strategy:</b> MA crossover enters <b>CALL</b> when fast MA crosses above slow MA, and <b>PUT</b> on opposite crossover.</div>' +
       '<div><b>Live config:</b> fast=' + runtimeSettings.maFast + ', slow=' + runtimeSettings.maSlow + ', amount=' + Number(runtimeSettings.maAmount || 1).toFixed(2) + ', pair=' + pairText + ', cooldown=' + runtimeSettings.maCooldownMs + 'ms.</div>' +
-      '<div><b>Feed status:</b> ' + feedText + ' | ticks=' + maStatus.ticks + ' | signals=' + maStatus.signals + ' | last signal=' + lastSignalText + '</div>' +
+      '<div><b>Feed status:</b> ' + feedText + ' | ticks=' + maStatus.ticks + ' | signals=' + maStatus.signals + ' | history points=' + maStatus.historyPoints + ' (' + maStatus.historyAssets + ' assets) | last signal=' + lastSignalText + '</div>' +
       '<div><b>How far to backtest:</b> set <b>Lookback Trades</b> (currently ' + lookback + ') and optional <b>From/To Date-Time</b>. Current filter: <b>' + rangeText + '</b>.</div>';
 
     stats.innerHTML =
@@ -1746,6 +1777,27 @@ function initMoneyPrinterUI() {
       return;
     }
 
+    if (d.act === 'maBacktestResult' && d.result && typeof d.result === 'object') {
+      lastMarketBacktest = {
+        strategy: d.result.strategy || 'ma-crossover',
+        asset: d.result.asset || '',
+        fastPeriod: Number(d.result.fastPeriod) || runtimeSettings.maFast,
+        slowPeriod: Number(d.result.slowPeriod) || runtimeSettings.maSlow,
+        pointsUsed: Number(d.result.pointsUsed) || 0,
+        sampleSize: Number(d.result.sampleSize) || 0,
+        wins: Number(d.result.wins) || 0,
+        losses: Number(d.result.losses) || 0,
+        draws: Number(d.result.draws) || 0,
+        accuracy: Number(d.result.accuracy) || 0,
+        pnl: Number(d.result.pnl) || 0,
+        firstTs: Number(d.result.firstTs) || Date.now(),
+        lastTs: Number(d.result.lastTs) || Date.now(),
+        finishedAt: Date.now()
+      };
+      renderBacktestResult();
+      return;
+    }
+
     if (d.act === 'maStatus' && d.status && typeof d.status === 'object') {
       maStatus = {
         ticks: Number(d.status.ticks) || 0,
@@ -1754,7 +1806,10 @@ function initMoneyPrinterUI() {
         lastPrice: Number(d.status.lastPrice),
         lastSignalAt: Number(d.status.lastSignalAt) || 0,
         lastSignalDir: d.status.lastSignalDir || '',
-        feedAliveAt: Number(d.status.feedAliveAt) || 0
+        feedAliveAt: Number(d.status.feedAliveAt) || 0,
+        historyPoints: Number(d.status.historyPoints) || 0,
+        historyAssets: Number(d.status.historyAssets) || 0,
+        historyUpdatedAt: Number(d.status.historyUpdatedAt) || 0
       };
       render();
     }
