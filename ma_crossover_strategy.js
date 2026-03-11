@@ -510,6 +510,7 @@
       toTs = t;
     }
 
+    var minPointsRequired = Math.max(6, cfg.slowPeriod + 1);
     var allAssets = Object.keys(historyByAsset);
     var targetKey = resolveAssetKey(requestedAsset);
     if ((!targetKey || !historyByAsset[targetKey]) && allAssets.length) {
@@ -534,6 +535,10 @@
       if (toTs !== null && point.ts > toTs) return false;
       return true;
     });
+
+    var nowMs = Date.now();
+    var latestTs = seriesNorm.length ? Number(seriesNorm[seriesNorm.length - 1].ts) || 0 : 0;
+    var ageMs = latestTs ? Math.max(0, nowMs - latestTs) : Number.POSITIVE_INFINITY;
 
     var bridgeChecks = {
       hasBridge: !!(window.MPBWebSocketBridge && window.MPBWebSocketBridge.patched),
@@ -568,6 +573,32 @@
       }
     }
 
+    var connected = bridgeChecks.hasBridge && (diagnostics.streamEvents > 0 || diagnostics.historyEvents > 0 || diagnostics.extractedTicks > 0);
+    var hasChartData = seriesNorm.length > 0 || status.historyPoints > 0;
+    var backtestReadyNoFilter = seriesNorm.length >= minPointsRequired;
+    var backtestReadyWithWindow = inWindow.length >= minPointsRequired;
+    var isFresh = latestTs ? ageMs <= 120000 : false;
+
+    var recommendations = [];
+    if (!connected) {
+      recommendations.push('No active market feed detected. Keep the trading tab open and wait for live ticks.');
+    }
+    if (connected && !hasChartData) {
+      recommendations.push('Feed is connected but no parsed chart points were stored yet. Verify scan pair filters and wait 10-20 seconds.');
+    }
+    if (hasChartData && !backtestReadyNoFilter) {
+      recommendations.push('Need at least ' + minPointsRequired + ' points for MA ' + cfg.fastPeriod + '/' + cfg.slowPeriod + ', but only ' + seriesNorm.length + ' points are available.');
+    }
+    if (backtestReadyNoFilter && !backtestReadyWithWindow) {
+      recommendations.push('Current From/To date filter excludes usable points. Clear date filters or use the data range shown below.');
+    }
+    if (hasChartData && !isFresh) {
+      recommendations.push('Data looks stale. Latest point age is ' + Math.round(ageMs / 1000) + 's; switch pair/timeframe or refresh chart.');
+    }
+    if (!recommendations.length) {
+      recommendations.push('Backtest data pipeline is ready for this asset.');
+    }
+
     var checks = [
       {
         id: 'bridge',
@@ -596,8 +627,8 @@
       },
       {
         id: 'asset_window_points',
-        ok: inWindow.length > 0,
-        detail: 'Target asset points in selected window: ' + inWindow.length
+        ok: backtestReadyWithWindow,
+        detail: 'Target asset points in selected window: ' + inWindow.length + ' (need >= ' + minPointsRequired + ')'
       },
       {
         id: 'timestamp_scale',
@@ -610,6 +641,18 @@
         id: 'dom_chart_presence',
         ok: domChecks.canvasCount > 0 || domChecks.chartNodeCount > 0,
         detail: 'DOM chart hints: canvas=' + domChecks.canvasCount + ', chartNodes=' + domChecks.chartNodeCount + ', quoteNodes=' + domChecks.quoteNodeCount
+      },
+      {
+        id: 'backtest_points_full',
+        ok: backtestReadyNoFilter,
+        detail: 'Resolved asset points: ' + seriesNorm.length + ' (need >= ' + minPointsRequired + ')'
+      },
+      {
+        id: 'data_freshness',
+        ok: isFresh,
+        detail: latestTs
+          ? ('Latest point age: ' + Math.round(ageMs / 1000) + 's')
+          : 'No latest point timestamp'
       }
     ];
 
@@ -620,10 +663,21 @@
       resolvedAssetKey: targetKey || '',
       selectedFromTs: fromTs,
       selectedToTs: toTs,
+      minPointsRequired: minPointsRequired,
       pointsForResolvedAsset: seriesNorm.length,
       pointsInWindow: inWindow.length,
       firstPointTs: seriesNorm.length ? Number(seriesNorm[0].ts) || 0 : 0,
       lastPointTs: seriesNorm.length ? Number(seriesNorm[seriesNorm.length - 1].ts) || 0 : 0,
+      ageMs: isFinite(ageMs) ? ageMs : null,
+      verdict: {
+        connected: connected,
+        hasChartData: hasChartData,
+        backtestReadyNoFilter: backtestReadyNoFilter,
+        backtestReadyWithWindow: backtestReadyWithWindow,
+        freshData: isFresh,
+        ready: connected && hasChartData && backtestReadyNoFilter
+      },
+      recommendations: recommendations,
       historySummary: status.historySummary.slice(),
       chartGlobals: chartGlobals,
       bridgeChecks: bridgeChecks,
@@ -642,8 +696,7 @@
         lastHistoryAt: diagnostics.lastHistoryAt
       },
       checks: checks,
-      overallOk: checks.some(function anyPass(item) { return item.id === 'stream_events' ? item.ok : false; }) ||
-        checks.some(function anyHistory(item) { return item.id === 'history_points' ? item.ok : false; }),
+      overallOk: connected && hasChartData && backtestReadyNoFilter,
       probedAt: Date.now()
     };
   }

@@ -1585,14 +1585,32 @@ function initMoneyPrinterUI() {
         ? lastChartProbe.chartGlobals.join(', ')
         : 'none detected';
 
+      var recs = Array.isArray(lastChartProbe.recommendations) ? lastChartProbe.recommendations : [];
+      var recHtml = '';
+      for (var r = 0; r < recs.length; r++) {
+        recHtml += '<div>Next: ' + String(recs[r]) + '</div>';
+      }
+
+      var verdict = lastChartProbe.verdict || {};
+      var readyText = verdict.ready ? 'READY' : 'NOT READY';
+      var readyReason = verdict.ready
+        ? 'Connected + enough chart points for MA warmup.'
+        : 'Missing one or more requirements shown below.';
+      var ageSecText = (typeof lastChartProbe.ageMs === 'number' && isFinite(lastChartProbe.ageMs))
+        ? Math.round(lastChartProbe.ageMs / 1000) + 's'
+        : 'n/a';
+
       html +=
-        '<div><b>Chart Access Probe</b> (' + new Date(lastChartProbe.finishedAt).toLocaleTimeString() + ')</div>' +
-        '<div>Status: <b>' + (lastChartProbe.overallOk ? 'PASS (market data reachable)' : 'FAIL (market data not confirmed yet)') + '</b></div>' +
+        '<div><b>Deep Backtest Test</b> (' + new Date(lastChartProbe.finishedAt).toLocaleTimeString() + ')</div>' +
+        '<div>Verdict: <b>' + readyText + '</b> - ' + readyReason + '</div>' +
         '<div>Request: <b>' + (lastChartProbe.requestedAsset || 'n/a') + '</b> [' + (lastChartProbe.requestedAssetKey || 'n/a') + ']</div>' +
-        '<div>Resolved: <b>' + (lastChartProbe.resolvedAsset || 'n/a') + '</b> [' + (lastChartProbe.resolvedAssetKey || 'n/a') + '] | Points total/window: <b>' + lastChartProbe.pointsForResolvedAsset + '/' + lastChartProbe.pointsInWindow + '</b></div>' +
+        '<div>Resolved: <b>' + (lastChartProbe.resolvedAsset || 'n/a') + '</b> [' + (lastChartProbe.resolvedAssetKey || 'n/a') + '] | Points total/window: <b>' + lastChartProbe.pointsForResolvedAsset + '/' + lastChartProbe.pointsInWindow + '</b> (need >= ' + (lastChartProbe.minPointsRequired || 0) + ')</div>' +
+        '<div>Connected: <b>' + (verdict.connected ? 'yes' : 'no') + '</b> | Chart data: <b>' + (verdict.hasChartData ? 'yes' : 'no') + '</b> | Fresh: <b>' + (verdict.freshData ? 'yes' : 'no') + '</b> (' + ageSecText + ' old)</div>' +
+        '<div>Backtest ready (no filter): <b>' + (verdict.backtestReadyNoFilter ? 'yes' : 'no') + '</b> | with current date filter: <b>' + (verdict.backtestReadyWithWindow ? 'yes' : 'no') + '</b></div>' +
         '<div>Data range: <b>' + (lastChartProbe.firstPointTs ? new Date(lastChartProbe.firstPointTs).toLocaleString() : 'n/a') + '</b> -> <b>' + (lastChartProbe.lastPointTs ? new Date(lastChartProbe.lastPointTs).toLocaleString() : 'n/a') + '</b></div>' +
         '<div>Chart globals: <b>' + chartGlobalsText + '</b></div>' +
-        checksHtml;
+        checksHtml +
+        recHtml;
     }
 
     if (lastMarketBacktest) {
@@ -1829,7 +1847,7 @@ function initMoneyPrinterUI() {
         '  <button id="mpb-bt-pairs-apply" class="btn btn-green">Apply Pair Filters</button>' +
         '  <button id="mpb-bt-range-data" class="btn">Use Data Range</button>' +
         '  <button id="mpb-bt-range-clear" class="btn">Clear Date/Time</button>' +
-        '  <button id="mpb-bt-probe" class="btn">Check Chart Access</button>' +
+        '  <button id="mpb-bt-probe" class="btn">Run Deep Backtest Test</button>' +
         '  <button id="mpb-bt-probe-clear" class="btn">Clear Probe</button>' +
         '  <button id="mpb-bt-start" class="btn btn-green" style="width:100%;padding:6px 8px;font-size:11px;">Start Backtest</button>' +
         '  <button id="mpb-bt-reset" class="btn" style="width:100%;padding:6px 8px;font-size:11px;">Clear Result</button>' +
@@ -1974,10 +1992,14 @@ function initMoneyPrinterUI() {
         requestedAssetKey: d.result.requestedAssetKey || '',
         resolvedAsset: d.result.resolvedAsset || '',
         resolvedAssetKey: d.result.resolvedAssetKey || '',
+        minPointsRequired: Number(d.result.minPointsRequired) || 0,
         pointsForResolvedAsset: Number(d.result.pointsForResolvedAsset) || 0,
         pointsInWindow: Number(d.result.pointsInWindow) || 0,
         firstPointTs: Number(d.result.firstPointTs) || 0,
         lastPointTs: Number(d.result.lastPointTs) || 0,
+        ageMs: (typeof d.result.ageMs === 'number' && isFinite(d.result.ageMs)) ? d.result.ageMs : null,
+        verdict: d.result.verdict && typeof d.result.verdict === 'object' ? d.result.verdict : {},
+        recommendations: Array.isArray(d.result.recommendations) ? d.result.recommendations : [],
         chartGlobals: Array.isArray(d.result.chartGlobals) ? d.result.chartGlobals : [],
         checks: Array.isArray(d.result.checks) ? d.result.checks : [],
         overallOk: !!d.result.overallOk,
