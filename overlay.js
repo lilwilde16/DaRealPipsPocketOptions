@@ -1273,6 +1273,15 @@ function initMoneyPrinterUI() {
     maPair: '',
     maCooldownMs: 8000
   };
+  var maStatus = {
+    ticks: 0,
+    signals: 0,
+    lastAsset: '',
+    lastPrice: null,
+    lastSignalAt: 0,
+    lastSignalDir: '',
+    feedAliveAt: 0
+  };
   var lastBacktest = null;
 
   function post(act, extra) {
@@ -1582,9 +1591,16 @@ function initMoneyPrinterUI() {
         (timeWindow.toTs !== null ? new Date(timeWindow.toTs).toLocaleString() : 'now');
     }
 
+    var feedText = maStatus.feedAliveAt
+      ? ('active @ ' + new Date(maStatus.feedAliveAt).toLocaleTimeString())
+      : 'waiting for stream';
+    var lastSignalText = maStatus.lastSignalAt
+      ? (new Date(maStatus.lastSignalAt).toLocaleTimeString() + ' ' + (maStatus.lastSignalDir || ''))
+      : 'none yet';
     desc.innerHTML =
       '<div><b>Strategy:</b> MA crossover enters <b>CALL</b> when fast MA crosses above slow MA, and <b>PUT</b> on opposite crossover.</div>' +
       '<div><b>Live config:</b> fast=' + runtimeSettings.maFast + ', slow=' + runtimeSettings.maSlow + ', amount=' + Number(runtimeSettings.maAmount || 1).toFixed(2) + ', pair=' + pairText + ', cooldown=' + runtimeSettings.maCooldownMs + 'ms.</div>' +
+      '<div><b>Feed status:</b> ' + feedText + ' | ticks=' + maStatus.ticks + ' | signals=' + maStatus.signals + ' | last signal=' + lastSignalText + '</div>' +
       '<div><b>How far to backtest:</b> set <b>Lookback Trades</b> (currently ' + lookback + ') and optional <b>From/To Date-Time</b>. Current filter: <b>' + rangeText + '</b>.</div>';
 
     stats.innerHTML =
@@ -1726,6 +1742,20 @@ function initMoneyPrinterUI() {
 
     if (d.act === 'trackerOrderClose' && d.order) {
       ingestClosedOrder(d.order);
+      render();
+      return;
+    }
+
+    if (d.act === 'maStatus' && d.status && typeof d.status === 'object') {
+      maStatus = {
+        ticks: Number(d.status.ticks) || 0,
+        signals: Number(d.status.signals) || 0,
+        lastAsset: d.status.lastAsset || '',
+        lastPrice: Number(d.status.lastPrice),
+        lastSignalAt: Number(d.status.lastSignalAt) || 0,
+        lastSignalDir: d.status.lastSignalDir || '',
+        feedAliveAt: Number(d.status.feedAliveAt) || 0
+      };
       render();
     }
   }, true);

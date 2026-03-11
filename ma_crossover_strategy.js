@@ -14,6 +14,16 @@
   var pricesByAsset = {};
   var lastRelationByAsset = {};
   var lastSignalAtByAsset = {};
+  var lastTickFingerprintByAsset = {};
+  var status = {
+    ticks: 0,
+    signals: 0,
+    lastAsset: '',
+    lastPrice: null,
+    lastSignalAt: 0,
+    lastSignalDir: '',
+    feedAliveAt: 0
+  };
 
   var cfg = {
     fastPeriod: 9,
@@ -32,6 +42,29 @@
 
   function postInfo(text) {
     window.postMessage({ belobot: true, info_text: text }, window.location.href);
+  }
+
+  function postStatus() {
+    window.postMessage({
+      belobot: true,
+      act: 'maStatus',
+      status: {
+        ticks: status.ticks,
+        signals: status.signals,
+        lastAsset: status.lastAsset,
+        lastPrice: status.lastPrice,
+        lastSignalAt: status.lastSignalAt,
+        lastSignalDir: status.lastSignalDir,
+        feedAliveAt: status.feedAliveAt,
+        config: {
+          fastPeriod: cfg.fastPeriod,
+          slowPeriod: cfg.slowPeriod,
+          amount: cfg.amount,
+          pair: cfg.pair,
+          cooldownMs: cfg.cooldownMs
+        }
+      }
+    }, window.location.href);
   }
 
   function isEnabled() {
@@ -77,7 +110,9 @@
 
   function shouldTradeAsset(asset) {
     if (!cfg.pair) return true;
-    return String(asset || '') === cfg.pair;
+    var a = String(asset || '').toLowerCase();
+    var p = String(cfg.pair || '').toLowerCase();
+    return a === p || a.indexOf(p) >= 0 || p.indexOf(a) >= 0;
   }
 
   function tradeFromCross(asset, relation) {
@@ -95,11 +130,28 @@
     });
 
     lastSignalAtByAsset[asset] = now;
+    status.signals += 1;
+    status.lastSignalAt = now;
+    status.lastSignalDir = direction;
     postInfo('MA crossover signal: ' + asset + ' ' + direction + ' @ ' + cfg.amount.toFixed(2));
+    postStatus();
   }
 
-  function onTick(asset, price) {
+  function onTick(asset, price, ts) {
     if (!shouldTradeAsset(asset)) return;
+
+    var tickTs = Number(ts) || Date.now();
+    var fp = String(tickTs) + '|' + String(price);
+    if (lastTickFingerprintByAsset[asset] === fp) {
+      return;
+    }
+    lastTickFingerprintByAsset[asset] = fp;
+
+    status.ticks += 1;
+    status.feedAliveAt = Date.now();
+    status.lastAsset = asset;
+    status.lastPrice = Number(price) || 0;
+
     pushPrice(asset, price);
 
     var arr = pricesByAsset[asset];
@@ -117,24 +169,80 @@
     tradeFromCross(asset, relation);
   }
 
-  market.on('server.event', function onServerEvent(ev) {
-    refreshConfig();
+  function extractTicks(payload) {
+    var out = [];
 
-    if (!ev || ev.category !== 'market.stream') return;
-    var body = ev.body;
-    if (!Array.isArray(body)) return;
-
-    for (var i = 0; i < body.length; i++) {
-      var row = body[i];
-      if (!Array.isArray(row) || row.length < 3) continue;
-      var asset = row[0];
-      var price = Number(row[2]);
-      if (!asset || !isFinite(price)) continue;
-      onTick(asset, price);
+    function add(asset, ts, price) {
+      var p = Number(price);
+      if (!asset || !isFinite(p)) return;
+      out.push({ asset: String(asset), ts: Number(ts) || Date.now(), price: p });
     }
+
+    if (!payload) return out;
+
+    if (Array.isArray(payload)) {
+      if (typeof payload[0] === 'string' && payload[0] === 'updateStream' && Array.isArray(payload[1])) {
+        var rows = payload[1];
+        for (var i = 0; i < rows.length; i++) {
+          var row1 = rows[i];
+          if (Array.isArray(row1) && row1.length >= 3) {
+            add(row1[0], row1[1], row1[2]);
+          } else if (row1 && typeof row1 === 'object') {
+            add(row1.asset || row1.pair || row1.symbol, row1.ts || row1.time || row1.timestamp, row1.price || row1.value || row1.close);
+          }
+        }
+        return out;
+      }
+
+      for (var j = 0; j < payload.length; j++) {
+        var row = payload[j];
+        if (Array.isArray(row) && row.length >= 3) {
+          add(row[0], row[1], row[2]);
+        } else if (row && typeof row === 'object') {
+          add(row.asset || row.pair || row.symbol, row.ts || row.time || row.timestamp, row.price || row.value || row.close);
+        }
+      }
+      return out;
+    }
+
+    if (payload && typeof payload === 'object') {
+      if (Array.isArray(payload.stream)) {
+        return extractTicks(payload.stream);
+      }
+      if (Array.isArray(payload.data)) {
+        return extractTicks(payload.data);
+      }
+      add(payload.asset || payload.pair || payload.symbol, payload.ts || payload.time || payload.timestamp, payload.price || payload.value || payload.close);
+    }
+
+    return out;
+  }
+
+  function handleTicks(ticks) {
+    if (!Array.isArray(ticks) || !ticks.length) return;
+    refreshConfig();
+    for (var i = 0; i < ticks.length; i++) {
+      onTick(ticks[i].asset, ticks[i].price, ticks[i].ts);
+    }
+  }
+
+  market.on('server.event', function onServerEvent(ev) {
+    if (!ev || ev.category !== 'market.stream') return;
+    handleTicks(extractTicks(ev.body));
   });
 
+  if (window.MPBWebSocketBridge && typeof window.MPBWebSocketBridge.on === 'function') {
+    window.MPBWebSocketBridge.on('inbound.parsed', function onBridgeParsed(ctx) {
+      var parsed = ctx && typeof ctx.parsed !== 'undefined' ? ctx.parsed : null;
+      var ticks = extractTicks(parsed);
+      if (ticks.length) {
+        handleTicks(ticks);
+      }
+    });
+  }
+
   setInterval(refreshConfig, 1500);
+  setInterval(postStatus, 5000);
 
   window.MPBMACrossoverStrategy = {
     getConfig: function getConfig() {
@@ -144,6 +252,17 @@
         amount: cfg.amount,
         pair: cfg.pair,
         cooldownMs: cfg.cooldownMs
+      };
+    },
+    getStatus: function getStatus() {
+      return {
+        ticks: status.ticks,
+        signals: status.signals,
+        lastAsset: status.lastAsset,
+        lastPrice: status.lastPrice,
+        lastSignalAt: status.lastSignalAt,
+        lastSignalDir: status.lastSignalDir,
+        feedAliveAt: status.feedAliveAt
       };
     }
   };
