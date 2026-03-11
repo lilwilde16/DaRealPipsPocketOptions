@@ -72,6 +72,20 @@
       .replace(/[^a-z0-9]+/g, '');
   }
 
+  function normalizeEpochMs(rawTs) {
+    var n = Number(rawTs);
+    if (!isFinite(n) || n <= 0) return Date.now();
+
+    // ns/us precision from some feeds.
+    if (n >= 1e18) return Math.round(n / 1000000);
+    if (n >= 1e15) return Math.round(n / 1000);
+
+    // Seconds epoch (common in broker stream payloads).
+    if (n < 1e11) return Math.round(n * 1000);
+
+    return Math.round(n);
+  }
+
   function rememberAssetLabel(rawAsset) {
     var raw = String(rawAsset || '').trim();
     var key = assetKey(raw);
@@ -150,7 +164,7 @@
         key: key,
         asset: assetLabelsByKey[key] || key,
         points: count,
-        lastTs: count ? Number(arr[count - 1].ts) || 0 : 0
+        lastTs: count ? normalizeEpochMs(arr[count - 1].ts) : 0
       });
     }
 
@@ -249,7 +263,7 @@
     if (!key) return;
     if (!historyByAsset[key]) historyByAsset[key] = [];
     var arr = historyByAsset[key];
-    var t = Number(ts) || Date.now();
+    var t = normalizeEpochMs(ts);
     var c = Number(close);
     if (!isFinite(c)) return;
 
@@ -388,7 +402,7 @@
     var resolvedAsset = assetLabelsByKey[key] || key;
     if (!shouldScanAsset(resolvedAsset)) return;
 
-    var tickTs = Number(ts) || Date.now();
+    var tickTs = normalizeEpochMs(ts);
     var fp = String(tickTs) + '|' + String(price);
     if (lastTickFingerprintByAsset[key] === fp) {
       return;
@@ -426,7 +440,7 @@
     function add(asset, ts, price) {
       var p = Number(price);
       if (!asset || !isFinite(p)) return;
-      out.push({ asset: String(asset), ts: Number(ts) || Date.now(), price: p });
+      out.push({ asset: String(asset), ts: normalizeEpochMs(ts), price: p });
     }
 
     if (!payload) return out;
@@ -503,8 +517,19 @@
     }
 
     var seriesRaw = historyByAsset[targetKey] || [];
-    var inWindow = seriesRaw.filter(function keepInRange(point) {
-      if (!point) return false;
+    var seriesNorm = seriesRaw.map(function normalizePoint(point) {
+      if (!point) return null;
+      return {
+        ts: normalizeEpochMs(point.ts),
+        close: Number(point.close)
+      };
+    }).filter(function keepValid(point) {
+      return !!point && isFinite(point.close);
+    }).sort(function sortByTs(a, b) {
+      return a.ts - b.ts;
+    });
+
+    var inWindow = seriesNorm.filter(function keepInRange(point) {
       if (fromTs !== null && point.ts < fromTs) return false;
       if (toTs !== null && point.ts > toTs) return false;
       return true;
@@ -575,6 +600,13 @@
         detail: 'Target asset points in selected window: ' + inWindow.length
       },
       {
+        id: 'timestamp_scale',
+        ok: seriesNorm.length ? (new Date(seriesNorm[0].ts).getUTCFullYear() >= 2010) : false,
+        detail: seriesNorm.length
+          ? ('First/last point UTC years: ' + new Date(seriesNorm[0].ts).getUTCFullYear() + '/' + new Date(seriesNorm[seriesNorm.length - 1].ts).getUTCFullYear())
+          : 'No normalized points for resolved asset'
+      },
+      {
         id: 'dom_chart_presence',
         ok: domChecks.canvasCount > 0 || domChecks.chartNodeCount > 0,
         detail: 'DOM chart hints: canvas=' + domChecks.canvasCount + ', chartNodes=' + domChecks.chartNodeCount + ', quoteNodes=' + domChecks.quoteNodeCount
@@ -588,10 +620,10 @@
       resolvedAssetKey: targetKey || '',
       selectedFromTs: fromTs,
       selectedToTs: toTs,
-      pointsForResolvedAsset: seriesRaw.length,
+      pointsForResolvedAsset: seriesNorm.length,
       pointsInWindow: inWindow.length,
-      firstPointTs: seriesRaw.length ? Number(seriesRaw[0].ts) || 0 : 0,
-      lastPointTs: seriesRaw.length ? Number(seriesRaw[seriesRaw.length - 1].ts) || 0 : 0,
+      firstPointTs: seriesNorm.length ? Number(seriesNorm[0].ts) || 0 : 0,
+      lastPointTs: seriesNorm.length ? Number(seriesNorm[seriesNorm.length - 1].ts) || 0 : 0,
       historySummary: status.historySummary.slice(),
       chartGlobals: chartGlobals,
       bridgeChecks: bridgeChecks,
@@ -666,11 +698,19 @@
     }
 
     var seriesRaw = historyByAsset[targetKey] || [];
-    var series = seriesRaw.filter(function filterTs(point) {
-      if (!point) return false;
+    var series = seriesRaw.map(function normalizePoint(point) {
+      if (!point) return null;
+      return {
+        ts: normalizeEpochMs(point.ts),
+        close: Number(point.close)
+      };
+    }).filter(function filterTs(point) {
+      if (!point || !isFinite(point.close)) return false;
       if (fromTs !== null && point.ts < fromTs) return false;
       if (toTs !== null && point.ts > toTs) return false;
       return true;
+    }).sort(function sortByTs(a, b) {
+      return a.ts - b.ts;
     });
 
     if (series.length > lookback) {
@@ -760,7 +800,7 @@
           key: key,
           asset: assetLabelsByKey[key] || key,
           points: arr.length,
-          lastTs: arr.length ? Number(arr[arr.length - 1].ts) || 0 : 0
+          lastTs: arr.length ? normalizeEpochMs(arr[arr.length - 1].ts) : 0
         };
       }).sort(function sortAssets(a, b) {
         if (b.points !== a.points) return b.points - a.points;
