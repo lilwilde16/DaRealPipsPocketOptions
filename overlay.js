@@ -1418,15 +1418,64 @@ function initMoneyPrinterUI() {
     };
   }
 
+  function pad2(n) {
+    var v = Number(n) || 0;
+    return v < 10 ? '0' + v : String(v);
+  }
+
+  function toDateTimeLocal(ms) {
+    var d = new Date(Number(ms) || Date.now());
+    return d.getFullYear() + '-' +
+      pad2(d.getMonth() + 1) + '-' +
+      pad2(d.getDate()) + 'T' +
+      pad2(d.getHours()) + ':' +
+      pad2(d.getMinutes());
+  }
+
+  function parseDateTimeInputValue(value) {
+    if (!value) return null;
+    var ts = Date.parse(value);
+    if (!isFinite(ts)) return null;
+    return ts;
+  }
+
+  function getSelectedTimeWindow() {
+    var fromInput = document.getElementById('mpb-bt-from');
+    var toInput = document.getElementById('mpb-bt-to');
+    var fromTs = fromInput ? parseDateTimeInputValue(fromInput.value) : null;
+    var toTs = toInput ? parseDateTimeInputValue(toInput.value) : null;
+
+    if (fromTs !== null && toTs !== null && fromTs > toTs) {
+      var tmp = fromTs;
+      fromTs = toTs;
+      toTs = tmp;
+    }
+
+    return {
+      fromTs: fromTs,
+      toTs: toTs
+    };
+  }
+
+  function applyTimeWindow(events, fromTs, toTs) {
+    return events.filter(function filterByTime(item) {
+      var t = Number(item.closedAt) || 0;
+      if (fromTs !== null && t < fromTs) return false;
+      if (toTs !== null && t > toTs) return false;
+      return true;
+    });
+  }
+
   function getSelectedStrategy() {
     var sel = document.getElementById('mpb-bt-strategy');
     return (sel && sel.value) ? sel.value : 'ma-crossover';
   }
 
-  function getFilteredEvents(strategy) {
-    return closes.filter(function filterByStrategy(item) {
+  function getFilteredEvents(strategy, fromTs, toTs) {
+    var strategyFiltered = closes.filter(function filterByStrategy(item) {
       return strategy === 'all' || item.strategy === strategy;
     });
+    return applyTimeWindow(strategyFiltered, fromTs, toTs);
   }
 
   function renderBacktestResult() {
@@ -1440,9 +1489,11 @@ function initMoneyPrinterUI() {
 
     var summary = lastBacktest.summary;
     var sim = lastBacktest.sim;
+    var rangeLabel = lastBacktest.timeRangeLabel || 'all loaded times';
     out.innerHTML =
       '<div><b>Backtest End Result</b> (' + new Date(lastBacktest.finishedAt).toLocaleTimeString() + ')</div>' +
       '<div>Strategy: <b>' + lastBacktest.strategy + '</b> | Range: <b>last ' + lastBacktest.lookback + '</b> closes (used ' + lastBacktest.sampleSize + ')</div>' +
+      '<div>Date/Time Filter: <b>' + rangeLabel + '</b></div>' +
       '<div>Period: <b>' + new Date(lastBacktest.firstTs).toLocaleTimeString() + '</b> to <b>' + new Date(lastBacktest.lastTs).toLocaleTimeString() + '</b></div>' +
       '<div>Win Rate: <b>' + summary.accuracy.toFixed(2) + '%</b> | Real PnL: <b>' + (summary.pnl >= 0 ? '+' : '') + summary.pnl.toFixed(2) + '</b></div>' +
       '<div>Sim PnL: <b>' + (sim.simPnl >= 0 ? '+' : '') + sim.simPnl.toFixed(2) + '</b> | Sim Max Depth: <b>' + sim.maxDepth + '</b> | Stops at max steps: <b>' + sim.cycleStops + '</b></div>' +
@@ -1456,11 +1507,19 @@ function initMoneyPrinterUI() {
     var payoutPct = Math.max(1, Number(document.getElementById('mpb-bt-payout').value) || 92);
     var maxSteps = Math.max(1, Math.floor(Number(document.getElementById('mpb-bt-steps').value) || 2));
     var lookback = Math.max(10, Math.floor(Number(document.getElementById('mpb-bt-lookback').value) || 200));
+    var timeWindow = getSelectedTimeWindow();
 
-    var filtered = getFilteredEvents(strategy);
+    var filtered = getFilteredEvents(strategy, timeWindow.fromTs, timeWindow.toTs);
     var sample = filtered.slice(Math.max(0, filtered.length - lookback));
     var summary = summarize(sample);
     var sim = simulateMartingale(sample, baseAmount, multiplier, payoutPct, maxSteps);
+
+    var rangeLabel = 'all loaded times';
+    if (timeWindow.fromTs !== null || timeWindow.toTs !== null) {
+      var fromLabel = timeWindow.fromTs !== null ? new Date(timeWindow.fromTs).toLocaleString() : 'beginning';
+      var toLabel = timeWindow.toTs !== null ? new Date(timeWindow.toTs).toLocaleString() : 'now';
+      rangeLabel = fromLabel + ' -> ' + toLabel;
+    }
 
     lastBacktest = {
       strategy: strategy,
@@ -1468,6 +1527,9 @@ function initMoneyPrinterUI() {
       sampleSize: sample.length,
       firstTs: sample.length ? sample[0].closedAt : Date.now(),
       lastTs: sample.length ? sample[sample.length - 1].closedAt : Date.now(),
+      fromTs: timeWindow.fromTs,
+      toTs: timeWindow.toTs,
+      timeRangeLabel: rangeLabel,
       summary: summary,
       sim: sim,
       finishedAt: Date.now()
@@ -1498,7 +1560,8 @@ function initMoneyPrinterUI() {
     }
 
     var strategy = sel.value || 'all';
-    var filtered = getFilteredEvents(strategy);
+    var timeWindow = getSelectedTimeWindow();
+    var filtered = getFilteredEvents(strategy, timeWindow.fromTs, timeWindow.toTs);
 
     var summary = summarize(filtered);
 
@@ -1511,13 +1574,21 @@ function initMoneyPrinterUI() {
     var sim = simulateMartingale(filtered, baseAmount, multiplier, payoutPct, maxSteps);
 
     var pairText = runtimeSettings.maPair ? runtimeSettings.maPair : 'all stream pairs';
+    var rangeText = 'all loaded times';
+    if (timeWindow.fromTs !== null || timeWindow.toTs !== null) {
+      rangeText =
+        (timeWindow.fromTs !== null ? new Date(timeWindow.fromTs).toLocaleString() : 'beginning') +
+        ' -> ' +
+        (timeWindow.toTs !== null ? new Date(timeWindow.toTs).toLocaleString() : 'now');
+    }
+
     desc.innerHTML =
       '<div><b>Strategy:</b> MA crossover enters <b>CALL</b> when fast MA crosses above slow MA, and <b>PUT</b> on opposite crossover.</div>' +
       '<div><b>Live config:</b> fast=' + runtimeSettings.maFast + ', slow=' + runtimeSettings.maSlow + ', amount=' + Number(runtimeSettings.maAmount || 1).toFixed(2) + ', pair=' + pairText + ', cooldown=' + runtimeSettings.maCooldownMs + 'ms.</div>' +
-      '<div><b>How far to backtest:</b> set <b>Lookback Trades</b> (currently ' + lookback + ') and click <b>Start Backtest</b> for a fixed end result.</div>';
+      '<div><b>How far to backtest:</b> set <b>Lookback Trades</b> (currently ' + lookback + ') and optional <b>From/To Date-Time</b>. Current filter: <b>' + rangeText + '</b>.</div>';
 
     stats.innerHTML =
-      '<div><b>Live Preview (all loaded closes)</b></div>' +
+      '<div><b>Live Preview (current strategy + date/time filter)</b></div>' +
       '<div>Total: <b>' + summary.total + '</b> | Wins: <b>' + summary.wins + '</b> | Losses: <b>' + summary.losses + '</b></div>' +
       '<div>Accuracy: <b>' + summary.accuracy.toFixed(2) + '%</b> | Real PnL: <b>' + (summary.pnl >= 0 ? '+' : '') + summary.pnl.toFixed(2) + '</b> | Avg: <b>' + (summary.avgPnl >= 0 ? '+' : '') + summary.avgPnl.toFixed(2) + '</b></div>' +
       '<div>Max Loss Streak: <b>' + summary.maxLossStreak + '</b> | Realized M Step: <b>' + summary.realizedMaxStep + '</b></div>' +
@@ -1552,6 +1623,7 @@ function initMoneyPrinterUI() {
         '#mpb-bt-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}' +
         '#mpb-bt-grid input,#mpb-bt-grid select{width:100%;background:#0f1b33;border:1px solid rgba(125,170,230,.35);border-radius:8px;color:#eef4ff;padding:6px;font-size:11px;}' +
         '#mpb-bt-grid .mpb-lbl{font-size:10px;color:#9fb7df;margin:0 0 2px 2px;display:block;}' +
+        '#mpb-bt-grid button{width:100%;padding:6px 8px;font-size:11px;}' +
         '#mpb-bt-stats{font-size:11px;line-height:1.4;color:#d7e6ff;margin:6px 0 8px;}' +
         '#mpb-bt-stats b{color:#ffffff;}' +
         '#mpb-bt-result{font-size:11px;line-height:1.4;color:#e5f0ff;margin:6px 0 8px;padding:7px;border:1px solid rgba(90,195,140,.35);border-radius:8px;background:rgba(7,24,18,.45);}' +
@@ -1571,10 +1643,14 @@ function initMoneyPrinterUI() {
         '<div id="mpb-bt-grid">' +
         '  <div><span class="mpb-lbl">Strategy</span><select id="mpb-bt-strategy"></select></div>' +
         '  <div><span class="mpb-lbl">Lookback Trades</span><input id="mpb-bt-lookback" type="number" step="1" value="200" placeholder="How far to backtest" /></div>' +
+        '  <div><span class="mpb-lbl">From Date/Time</span><input id="mpb-bt-from" type="datetime-local" /></div>' +
+        '  <div><span class="mpb-lbl">To Date/Time</span><input id="mpb-bt-to" type="datetime-local" /></div>' +
         '  <div><span class="mpb-lbl">Base Amount</span><input id="mpb-bt-base" type="number" step="0.01" value="1" placeholder="Base amount" /></div>' +
         '  <div><span class="mpb-lbl">Multiplier</span><input id="mpb-bt-multi" type="number" step="0.1" value="2" placeholder="Multiplier" /></div>' +
         '  <div><span class="mpb-lbl">Payout %</span><input id="mpb-bt-payout" type="number" step="0.1" value="92" placeholder="Payout %" /></div>' +
         '  <div><span class="mpb-lbl">Max Steps</span><input id="mpb-bt-steps" type="number" step="1" value="2" placeholder="Max steps" /></div>' +
+        '  <button id="mpb-bt-range-data" class="btn">Use Data Range</button>' +
+        '  <button id="mpb-bt-range-clear" class="btn">Clear Date/Time</button>' +
         '  <button id="mpb-bt-start" class="btn btn-green" style="width:100%;padding:6px 8px;font-size:11px;">Start Backtest</button>' +
         '  <button id="mpb-bt-reset" class="btn" style="width:100%;padding:6px 8px;font-size:11px;">Clear Result</button>' +
         '</div>' +
@@ -1593,11 +1669,35 @@ function initMoneyPrinterUI() {
         renderBacktestResult();
       });
 
+      card.querySelector('#mpb-bt-range-data').addEventListener('click', function () {
+        if (!closes.length) return;
+        var fromInput = document.getElementById('mpb-bt-from');
+        var toInput = document.getElementById('mpb-bt-to');
+        if (fromInput) fromInput.value = toDateTimeLocal(closes[0].closedAt);
+        if (toInput) toInput.value = toDateTimeLocal(closes[closes.length - 1].closedAt);
+        render();
+      });
+
+      card.querySelector('#mpb-bt-range-clear').addEventListener('click', function () {
+        var fromInput = document.getElementById('mpb-bt-from');
+        var toInput = document.getElementById('mpb-bt-to');
+        if (fromInput) fromInput.value = '';
+        if (toInput) toInput.value = '';
+        render();
+      });
+
       var fields = card.querySelectorAll('input,select');
       for (var i = 0; i < fields.length; i++) {
         fields[i].addEventListener('input', render);
         fields[i].addEventListener('change', render);
       }
+    }
+
+    var fromField = document.getElementById('mpb-bt-from');
+    var toField = document.getElementById('mpb-bt-to');
+    if (closes.length && fromField && toField && !fromField.value && !toField.value) {
+      fromField.value = toDateTimeLocal(closes[0].closedAt);
+      toField.value = toDateTimeLocal(closes[closes.length - 1].closedAt);
     }
 
     render();
