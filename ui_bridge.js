@@ -32,6 +32,8 @@
       maSlow: 21,
       maAmount: 1,
       maPair: '',
+      maScanPairs: '',
+      maTradePairs: '',
       maCooldownMs: 8000
     }
   };

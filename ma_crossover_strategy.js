@@ -37,6 +37,10 @@
     slowPeriod: 21,
     amount: 1,
     pair: '',
+    scanPairsText: '',
+    tradePairsText: '',
+    scanPairsList: [],
+    tradePairsList: [],
     cooldownMs: 8000
   };
 
@@ -80,6 +84,43 @@
 
   function postInfo(text) {
     window.postMessage({ belobot: true, info_text: text }, window.location.href);
+  }
+
+  function parsePairList(text) {
+    var out = [];
+    var seen = {};
+    var tokens = String(text || '').split(/[\s,;\n\t]+/);
+    for (var i = 0; i < tokens.length; i++) {
+      var raw = String(tokens[i] || '').trim();
+      if (!raw) continue;
+      var key = assetKey(raw);
+      if (!key || seen[key]) continue;
+      seen[key] = true;
+      out.push({ key: key, raw: raw });
+      if (!assetLabelsByKey[key]) {
+        assetLabelsByKey[key] = raw;
+      }
+    }
+    return out;
+  }
+
+  function firstPairText(list) {
+    if (!Array.isArray(list) || !list.length) return '';
+    return list[0].raw || assetLabelsByKey[list[0].key] || list[0].key;
+  }
+
+  function matchesPairList(asset, list) {
+    if (!Array.isArray(list) || !list.length) return true;
+    var k = assetKey(asset);
+    if (!k) return false;
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i] && list[i].key ? list[i].key : '';
+      if (!f) continue;
+      if (k === f || k.indexOf(f) >= 0 || f.indexOf(k) >= 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function postStatus() {
@@ -129,6 +170,8 @@
           slowPeriod: cfg.slowPeriod,
           amount: cfg.amount,
           pair: cfg.pair,
+          scanPairs: cfg.scanPairsText,
+          tradePairs: cfg.tradePairsText,
           cooldownMs: cfg.cooldownMs
         }
       }
@@ -149,12 +192,30 @@
     var s = Number(settings.maSlow);
     var a = Number(settings.maAmount);
     var c = Number(settings.maCooldownMs);
+    var singlePair = typeof settings.maPair === 'string' ? settings.maPair.trim() : '';
+    var scanPairsText = typeof settings.maScanPairs === 'string' ? settings.maScanPairs.trim() : '';
+    var tradePairsText = typeof settings.maTradePairs === 'string' ? settings.maTradePairs.trim() : '';
+
+    if (!scanPairsText && !tradePairsText && singlePair) {
+      scanPairsText = singlePair;
+      tradePairsText = singlePair;
+    } else if (!tradePairsText && scanPairsText) {
+      tradePairsText = scanPairsText;
+    }
 
     if (isFinite(f) && f >= 2) cfg.fastPeriod = Math.floor(f);
     if (isFinite(s) && s >= 3) cfg.slowPeriod = Math.floor(s);
     if (cfg.slowPeriod <= cfg.fastPeriod) cfg.slowPeriod = cfg.fastPeriod + 1;
     if (isFinite(a) && a > 0) cfg.amount = Math.max(0.35, Math.round(a * 100) / 100);
-    if (typeof settings.maPair === 'string') cfg.pair = settings.maPair.trim();
+    if (singlePair) {
+      cfg.pair = singlePair;
+    } else {
+      cfg.pair = firstPairText(parsePairList(tradePairsText)) || firstPairText(parsePairList(scanPairsText)) || '';
+    }
+    cfg.scanPairsText = scanPairsText;
+    cfg.tradePairsText = tradePairsText;
+    cfg.scanPairsList = parsePairList(scanPairsText);
+    cfg.tradePairsList = parsePairList(tradePairsText);
     if (isFinite(c) && c >= 1000) cfg.cooldownMs = Math.floor(c);
   }
 
@@ -216,6 +277,7 @@
     if (!payload || typeof payload !== 'object') return;
     var asset = payload.asset || payload.pair || payload.symbol;
     if (!asset) return;
+    if (!shouldScanAsset(asset)) return;
 
     var candles = Array.isArray(payload.candles) ? payload.candles : [];
     var history = Array.isArray(payload.history) ? payload.history : [];
@@ -251,10 +313,23 @@
   }
 
   function shouldTradeAsset(asset) {
-    if (!cfg.pair) return true;
-    var a = assetKey(asset);
-    var p = assetKey(cfg.pair || '');
-    return !!a && !!p && (a === p || a.indexOf(p) >= 0 || p.indexOf(a) >= 0);
+    if (cfg.tradePairsList.length) {
+      return matchesPairList(asset, cfg.tradePairsList);
+    }
+    if (cfg.pair) {
+      return matchesPairList(asset, [{ key: assetKey(cfg.pair), raw: cfg.pair }]);
+    }
+    return true;
+  }
+
+  function shouldScanAsset(asset) {
+    if (cfg.scanPairsList.length) {
+      return matchesPairList(asset, cfg.scanPairsList);
+    }
+    if (cfg.pair) {
+      return matchesPairList(asset, [{ key: assetKey(cfg.pair), raw: cfg.pair }]);
+    }
+    return true;
   }
 
   function tradeFromCross(asset, relation) {
@@ -284,7 +359,8 @@
   function onTick(asset, price, ts) {
     var key = resolveAssetKey(asset);
     if (!key) return;
-    if (!shouldTradeAsset(assetLabelsByKey[key] || key)) return;
+    var resolvedAsset = assetLabelsByKey[key] || key;
+    if (!shouldScanAsset(resolvedAsset)) return;
 
     var tickTs = Number(ts) || Date.now();
     var fp = String(tickTs) + '|' + String(price);
@@ -295,7 +371,7 @@
 
     status.ticks += 1;
     status.feedAliveAt = Date.now();
-    status.lastAsset = assetLabelsByKey[key] || key;
+    status.lastAsset = resolvedAsset;
     status.lastAssetKey = key;
     status.lastPrice = Number(price) || 0;
 
@@ -313,6 +389,7 @@
 
     if (!prev || prev === relation) return;
     if (!isEnabled()) return;
+    if (!shouldTradeAsset(resolvedAsset)) return;
 
     tradeFromCross(key, relation);
   }
@@ -389,7 +466,7 @@
 
     var requestedAsset = (params && params.asset) ? String(params.asset) : '';
     if (!requestedAsset) {
-      requestedAsset = cfg.pair || status.lastAsset || '';
+      requestedAsset = cfg.pair || firstPairText(cfg.tradePairsList) || firstPairText(cfg.scanPairsList) || status.lastAsset || '';
     }
 
     var fast = Math.max(2, Math.floor(Number(params && params.fastPeriod) || cfg.fastPeriod));
@@ -524,6 +601,8 @@
         if (b.points !== a.points) return b.points - a.points;
         return (b.lastTs || 0) - (a.lastTs || 0);
       }).slice(0, 12),
+      scanPairs: cfg.scanPairsText,
+      tradePairs: cfg.tradePairsText,
       recentSignals: signals.slice(Math.max(0, signals.length - 20))
     };
   }
@@ -535,6 +614,7 @@
       return;
     }
     if (ev.category === 'market.history') {
+      refreshConfig();
       ingestHistoryPayload(ev.body);
       return;
     }
@@ -574,6 +654,8 @@
         slowPeriod: cfg.slowPeriod,
         amount: cfg.amount,
         pair: cfg.pair,
+        scanPairs: cfg.scanPairsText,
+        tradePairs: cfg.tradePairsText,
         cooldownMs: cfg.cooldownMs
       };
     },

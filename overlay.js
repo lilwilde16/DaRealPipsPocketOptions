@@ -1271,6 +1271,8 @@ function initMoneyPrinterUI() {
     maSlow: 21,
     maAmount: 1,
     maPair: '',
+    maScanPairs: '',
+    maTradePairs: '',
     maCooldownMs: 8000
   };
   var maStatus = {
@@ -1486,6 +1488,72 @@ function initMoneyPrinterUI() {
     return (sel && sel.value) ? sel.value : 'ma-crossover';
   }
 
+  function splitPairList(text) {
+    var out = [];
+    var seen = {};
+    var rows = String(text || '').split(/[\s,;\n\t]+/);
+    for (var i = 0; i < rows.length; i++) {
+      var token = String(rows[i] || '').trim();
+      if (!token) continue;
+      var key = token.toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(token);
+    }
+    return out;
+  }
+
+  function firstPairFromList(text) {
+    var list = splitPairList(text);
+    return list.length ? list[0] : '';
+  }
+
+  function pickBacktestAsset() {
+    return runtimeSettings.maPair ||
+      firstPairFromList(runtimeSettings.maTradePairs) ||
+      firstPairFromList(runtimeSettings.maScanPairs) ||
+      maStatus.lastAsset ||
+      '';
+  }
+
+  function syncPairInputsFromSettings() {
+    var scanInput = document.getElementById('mpb-bt-scan-pairs');
+    var tradeInput = document.getElementById('mpb-bt-trade-pairs');
+    var active = document.activeElement;
+    if (scanInput && active !== scanInput) {
+      if (scanInput.value !== String(runtimeSettings.maScanPairs || '')) {
+        scanInput.value = String(runtimeSettings.maScanPairs || '');
+      }
+    }
+    if (tradeInput && active !== tradeInput) {
+      if (tradeInput.value !== String(runtimeSettings.maTradePairs || '')) {
+        tradeInput.value = String(runtimeSettings.maTradePairs || '');
+      }
+    }
+  }
+
+  function applyPairFilters() {
+    var scanInput = document.getElementById('mpb-bt-scan-pairs');
+    var tradeInput = document.getElementById('mpb-bt-trade-pairs');
+    var scanPairs = scanInput ? String(scanInput.value || '').trim() : '';
+    var tradePairs = tradeInput ? String(tradeInput.value || '').trim() : '';
+    var legacyPair = firstPairFromList(tradePairs) || firstPairFromList(scanPairs) || '';
+
+    runtimeSettings.maScanPairs = scanPairs;
+    runtimeSettings.maTradePairs = tradePairs;
+    runtimeSettings.maPair = legacyPair;
+
+    post('setState', {
+      settings: {
+        maScanPairs: scanPairs,
+        maTradePairs: tradePairs,
+        maPair: legacyPair
+      }
+    });
+    post('runtimeSnapshot');
+    render();
+  }
+
   function getFilteredEvents(strategy, fromTs, toTs) {
     var strategyFiltered = closes.filter(function filterByStrategy(item) {
       return strategy === 'all' || item.strategy === strategy;
@@ -1513,6 +1581,7 @@ function initMoneyPrinterUI() {
       }
       html +=
         '<div><b>Market Data Backtest</b> (' + new Date(lastMarketBacktest.finishedAt).toLocaleTimeString() + ')</div>' +
+        '<div>Scan Pairs: <b>' + (lastMarketBacktest.scanPairs || 'all stream pairs') + '</b> | Trade Pairs: <b>' + (lastMarketBacktest.tradePairs || 'all scanned pairs') + '</b></div>' +
         '<div>Request: <b>' + (lastMarketBacktest.requestedAsset || 'n/a') + '</b> [' + (lastMarketBacktest.requestedAssetKey || 'n/a') + ']</div>' +
         '<div>Resolved: <b>' + (lastMarketBacktest.asset || 'n/a') + '</b> [' + (lastMarketBacktest.assetKey || 'n/a') + '] | MA: <b>' + lastMarketBacktest.fastPeriod + '/' + lastMarketBacktest.slowPeriod + '</b> | Points: <b>' + lastMarketBacktest.pointsUsed + '</b></div>' +
         '<div>Signals: <b>' + lastMarketBacktest.sampleSize + '</b> | Wins: <b>' + lastMarketBacktest.wins + '</b> | Losses: <b>' + lastMarketBacktest.losses + '</b> | Draws: <b>' + lastMarketBacktest.draws + '</b></div>' +
@@ -1548,7 +1617,7 @@ function initMoneyPrinterUI() {
 
     post('maBacktestRun', {
       params: {
-        asset: runtimeSettings.maPair || maStatus.lastAsset || '',
+        asset: pickBacktestAsset(),
         fastPeriod: runtimeSettings.maFast,
         slowPeriod: runtimeSettings.maSlow,
         baseAmount: baseAmount,
@@ -1623,7 +1692,10 @@ function initMoneyPrinterUI() {
 
     var sim = simulateMartingale(filtered, baseAmount, multiplier, payoutPct, maxSteps);
 
-    var pairText = runtimeSettings.maPair ? runtimeSettings.maPair : 'all stream pairs';
+    syncPairInputsFromSettings();
+
+    var scanText = runtimeSettings.maScanPairs ? runtimeSettings.maScanPairs : (runtimeSettings.maPair ? runtimeSettings.maPair : 'all stream pairs');
+    var tradeText = runtimeSettings.maTradePairs ? runtimeSettings.maTradePairs : (runtimeSettings.maPair ? runtimeSettings.maPair : 'all scanned pairs');
     var rangeText = 'all loaded times';
     if (timeWindow.fromTs !== null || timeWindow.toTs !== null) {
       rangeText =
@@ -1646,7 +1718,7 @@ function initMoneyPrinterUI() {
     }
     desc.innerHTML =
       '<div><b>Strategy:</b> MA crossover enters <b>CALL</b> when fast MA crosses above slow MA, and <b>PUT</b> on opposite crossover.</div>' +
-      '<div><b>Live config:</b> fast=' + runtimeSettings.maFast + ', slow=' + runtimeSettings.maSlow + ', amount=' + Number(runtimeSettings.maAmount || 1).toFixed(2) + ', pair=' + pairText + ', cooldown=' + runtimeSettings.maCooldownMs + 'ms.</div>' +
+      '<div><b>Live config:</b> fast=' + runtimeSettings.maFast + ', slow=' + runtimeSettings.maSlow + ', amount=' + Number(runtimeSettings.maAmount || 1).toFixed(2) + ', scan=' + scanText + ', trade=' + tradeText + ', cooldown=' + runtimeSettings.maCooldownMs + 'ms.</div>' +
       '<div><b>Feed status:</b> ' + feedText + ' | ticks=' + maStatus.ticks + ' | signals=' + maStatus.signals + ' | last asset=' + (maStatus.lastAsset || 'n/a') + ' [' + (maStatus.lastAssetKey || 'n/a') + '] | last signal=' + lastSignalText + '</div>' +
       '<div><b>History buckets:</b> total points=' + maStatus.historyPoints + ' (' + maStatus.historyAssets + ' assets) | ' + historySummaryText + '</div>' +
       '<div><b>How far to backtest:</b> set <b>Lookback Trades</b> (currently ' + lookback + ') and optional <b>From/To Date-Time</b>. Current filter: <b>' + rangeText + '</b>.</div>';
@@ -1707,12 +1779,16 @@ function initMoneyPrinterUI() {
         '<div id="mpb-bt-grid">' +
         '  <div><span class="mpb-lbl">Strategy</span><select id="mpb-bt-strategy"></select></div>' +
         '  <div><span class="mpb-lbl">Lookback Trades</span><input id="mpb-bt-lookback" type="number" step="1" value="200" placeholder="How far to backtest" /></div>' +
+        '  <div><span class="mpb-lbl">Scan Pairs (comma separated)</span><input id="mpb-bt-scan-pairs" type="text" placeholder="EURUSD_otc, GBPUSD_otc" /></div>' +
+        '  <div><span class="mpb-lbl">Trade Pairs (comma separated)</span><input id="mpb-bt-trade-pairs" type="text" placeholder="Leave empty to trade all scanned" /></div>' +
         '  <div><span class="mpb-lbl">From Date/Time</span><input id="mpb-bt-from" type="datetime-local" /></div>' +
         '  <div><span class="mpb-lbl">To Date/Time</span><input id="mpb-bt-to" type="datetime-local" /></div>' +
         '  <div><span class="mpb-lbl">Base Amount</span><input id="mpb-bt-base" type="number" step="0.01" value="1" placeholder="Base amount" /></div>' +
         '  <div><span class="mpb-lbl">Multiplier</span><input id="mpb-bt-multi" type="number" step="0.1" value="2" placeholder="Multiplier" /></div>' +
         '  <div><span class="mpb-lbl">Payout %</span><input id="mpb-bt-payout" type="number" step="0.1" value="92" placeholder="Payout %" /></div>' +
         '  <div><span class="mpb-lbl">Max Steps</span><input id="mpb-bt-steps" type="number" step="1" value="2" placeholder="Max steps" /></div>' +
+        '  <button id="mpb-bt-pairs-data" class="btn">Use Loaded Pairs</button>' +
+        '  <button id="mpb-bt-pairs-apply" class="btn btn-green">Apply Pair Filters</button>' +
         '  <button id="mpb-bt-range-data" class="btn">Use Data Range</button>' +
         '  <button id="mpb-bt-range-clear" class="btn">Clear Date/Time</button>' +
         '  <button id="mpb-bt-start" class="btn btn-green" style="width:100%;padding:6px 8px;font-size:11px;">Start Backtest</button>' +
@@ -1740,6 +1816,24 @@ function initMoneyPrinterUI() {
         if (fromInput) fromInput.value = toDateTimeLocal(closes[0].closedAt);
         if (toInput) toInput.value = toDateTimeLocal(closes[closes.length - 1].closedAt);
         render();
+      });
+
+      card.querySelector('#mpb-bt-pairs-data').addEventListener('click', function () {
+        if (!Array.isArray(maStatus.historySummary) || !maStatus.historySummary.length) return;
+        var scanInput = document.getElementById('mpb-bt-scan-pairs');
+        var tradeInput = document.getElementById('mpb-bt-trade-pairs');
+        var pairs = maStatus.historySummary.map(function mapAsset(item) {
+          return item.asset || item.key || '';
+        }).filter(function keep(v) { return !!v; });
+        if (scanInput) scanInput.value = pairs.join(', ');
+        if (tradeInput && !String(tradeInput.value || '').trim()) {
+          tradeInput.value = pairs.join(', ');
+        }
+        render();
+      });
+
+      card.querySelector('#mpb-bt-pairs-apply').addEventListener('click', function () {
+        applyPairFilters();
       });
 
       card.querySelector('#mpb-bt-range-clear').addEventListener('click', function () {
@@ -1781,6 +1875,8 @@ function initMoneyPrinterUI() {
           maSlow: Number(d.snapshot.settings.maSlow) || runtimeSettings.maSlow,
           maAmount: Number(d.snapshot.settings.maAmount) || runtimeSettings.maAmount,
           maPair: typeof d.snapshot.settings.maPair === 'string' ? d.snapshot.settings.maPair : runtimeSettings.maPair,
+          maScanPairs: typeof d.snapshot.settings.maScanPairs === 'string' ? d.snapshot.settings.maScanPairs : runtimeSettings.maScanPairs,
+          maTradePairs: typeof d.snapshot.settings.maTradePairs === 'string' ? d.snapshot.settings.maTradePairs : runtimeSettings.maTradePairs,
           maCooldownMs: Number(d.snapshot.settings.maCooldownMs) || runtimeSettings.maCooldownMs
         };
       }
@@ -1803,6 +1899,8 @@ function initMoneyPrinterUI() {
         assetKey: d.result.assetKey || '',
         fastPeriod: Number(d.result.fastPeriod) || runtimeSettings.maFast,
         slowPeriod: Number(d.result.slowPeriod) || runtimeSettings.maSlow,
+        scanPairs: d.result.scanPairs || '',
+        tradePairs: d.result.tradePairs || '',
         pointsUsed: Number(d.result.pointsUsed) || 0,
         sampleSize: Number(d.result.sampleSize) || 0,
         wins: Number(d.result.wins) || 0,
