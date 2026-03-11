@@ -1291,6 +1291,7 @@ function initMoneyPrinterUI() {
   };
   var lastBacktest = null;
   var lastMarketBacktest = null;
+  var lastChartProbe = null;
 
   function post(act, extra) {
     var payload = { belobot: true, act: act };
@@ -1565,12 +1566,34 @@ function initMoneyPrinterUI() {
     var out = document.getElementById('mpb-bt-result');
     if (!out) return;
 
-    if (!lastBacktest && !lastMarketBacktest) {
+    var html = '';
+
+    if (!lastBacktest && !lastMarketBacktest && !lastChartProbe) {
       out.innerHTML = '<div>No backtest started yet. Set inputs and click <b>Start Backtest</b>.</div>';
       return;
     }
 
-    var html = '';
+    if (lastChartProbe) {
+      var checks = Array.isArray(lastChartProbe.checks) ? lastChartProbe.checks : [];
+      var checksHtml = '';
+      for (var i = 0; i < checks.length; i++) {
+        checksHtml +=
+          '<div>' + (checks[i].ok ? '[OK] ' : '[X] ') + (checks[i].id || 'check') + ': ' + (checks[i].detail || '') + '</div>';
+      }
+
+      var chartGlobalsText = Array.isArray(lastChartProbe.chartGlobals) && lastChartProbe.chartGlobals.length
+        ? lastChartProbe.chartGlobals.join(', ')
+        : 'none detected';
+
+      html +=
+        '<div><b>Chart Access Probe</b> (' + new Date(lastChartProbe.finishedAt).toLocaleTimeString() + ')</div>' +
+        '<div>Status: <b>' + (lastChartProbe.overallOk ? 'PASS (market data reachable)' : 'FAIL (market data not confirmed yet)') + '</b></div>' +
+        '<div>Request: <b>' + (lastChartProbe.requestedAsset || 'n/a') + '</b> [' + (lastChartProbe.requestedAssetKey || 'n/a') + ']</div>' +
+        '<div>Resolved: <b>' + (lastChartProbe.resolvedAsset || 'n/a') + '</b> [' + (lastChartProbe.resolvedAssetKey || 'n/a') + '] | Points total/window: <b>' + lastChartProbe.pointsForResolvedAsset + '/' + lastChartProbe.pointsInWindow + '</b></div>' +
+        '<div>Data range: <b>' + (lastChartProbe.firstPointTs ? new Date(lastChartProbe.firstPointTs).toLocaleString() : 'n/a') + '</b> -> <b>' + (lastChartProbe.lastPointTs ? new Date(lastChartProbe.lastPointTs).toLocaleString() : 'n/a') + '</b></div>' +
+        '<div>Chart globals: <b>' + chartGlobalsText + '</b></div>' +
+        checksHtml;
+    }
 
     if (lastMarketBacktest) {
       var availableText = 'none';
@@ -1607,6 +1630,8 @@ function initMoneyPrinterUI() {
   }
 
   function runBacktest() {
+    applyPairFilters();
+
     var strategy = getSelectedStrategy();
     var baseAmount = Math.max(0.35, Number(document.getElementById('mpb-bt-base').value) || 1);
     var multiplier = Math.max(1.1, Number(document.getElementById('mpb-bt-multi').value) || 2);
@@ -1655,6 +1680,19 @@ function initMoneyPrinterUI() {
     };
 
     renderBacktestResult();
+  }
+
+  function runChartProbe() {
+    applyPairFilters();
+    var timeWindow = getSelectedTimeWindow();
+
+    post('maChartProbeRun', {
+      params: {
+        asset: pickBacktestAsset(),
+        fromTs: timeWindow.fromTs,
+        toTs: timeWindow.toTs
+      }
+    });
   }
 
   function render() {
@@ -1791,6 +1829,8 @@ function initMoneyPrinterUI() {
         '  <button id="mpb-bt-pairs-apply" class="btn btn-green">Apply Pair Filters</button>' +
         '  <button id="mpb-bt-range-data" class="btn">Use Data Range</button>' +
         '  <button id="mpb-bt-range-clear" class="btn">Clear Date/Time</button>' +
+        '  <button id="mpb-bt-probe" class="btn">Check Chart Access</button>' +
+        '  <button id="mpb-bt-probe-clear" class="btn">Clear Probe</button>' +
         '  <button id="mpb-bt-start" class="btn btn-green" style="width:100%;padding:6px 8px;font-size:11px;">Start Backtest</button>' +
         '  <button id="mpb-bt-reset" class="btn" style="width:100%;padding:6px 8px;font-size:11px;">Clear Result</button>' +
         '</div>' +
@@ -1806,6 +1846,7 @@ function initMoneyPrinterUI() {
 
       card.querySelector('#mpb-bt-reset').addEventListener('click', function () {
         lastBacktest = null;
+        lastMarketBacktest = null;
         renderBacktestResult();
       });
 
@@ -1834,6 +1875,16 @@ function initMoneyPrinterUI() {
 
       card.querySelector('#mpb-bt-pairs-apply').addEventListener('click', function () {
         applyPairFilters();
+      });
+
+      card.querySelector('#mpb-bt-probe').addEventListener('click', function () {
+        post('runtimeSnapshot');
+        runChartProbe();
+      });
+
+      card.querySelector('#mpb-bt-probe-clear').addEventListener('click', function () {
+        lastChartProbe = null;
+        renderBacktestResult();
       });
 
       card.querySelector('#mpb-bt-range-clear').addEventListener('click', function () {
@@ -1911,6 +1962,25 @@ function initMoneyPrinterUI() {
         firstTs: Number(d.result.firstTs) || Date.now(),
         lastTs: Number(d.result.lastTs) || Date.now(),
         availableAssets: Array.isArray(d.result.availableAssets) ? d.result.availableAssets : [],
+        finishedAt: Date.now()
+      };
+      renderBacktestResult();
+      return;
+    }
+
+    if (d.act === 'maChartProbeResult' && d.result && typeof d.result === 'object') {
+      lastChartProbe = {
+        requestedAsset: d.result.requestedAsset || '',
+        requestedAssetKey: d.result.requestedAssetKey || '',
+        resolvedAsset: d.result.resolvedAsset || '',
+        resolvedAssetKey: d.result.resolvedAssetKey || '',
+        pointsForResolvedAsset: Number(d.result.pointsForResolvedAsset) || 0,
+        pointsInWindow: Number(d.result.pointsInWindow) || 0,
+        firstPointTs: Number(d.result.firstPointTs) || 0,
+        lastPointTs: Number(d.result.lastPointTs) || 0,
+        chartGlobals: Array.isArray(d.result.chartGlobals) ? d.result.chartGlobals : [],
+        checks: Array.isArray(d.result.checks) ? d.result.checks : [],
+        overallOk: !!d.result.overallOk,
         finishedAt: Date.now()
       };
       renderBacktestResult();

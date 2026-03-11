@@ -17,6 +17,20 @@
   var lastRelationByAsset = {};
   var lastSignalAtByAsset = {};
   var lastTickFingerprintByAsset = {};
+  var diagnostics = {
+    serverEvents: 0,
+    streamEvents: 0,
+    historyEvents: 0,
+    lastEventName: '',
+    lastEventAt: 0,
+    inboundParsedFrames: 0,
+    inboundTickFrames: 0,
+    extractedTicks: 0,
+    historyRowsIngested: 0,
+    historyRejectedByScan: 0,
+    lastHistoryAsset: '',
+    lastHistoryAt: 0
+  };
   var status = {
     ticks: 0,
     signals: 0,
@@ -277,10 +291,14 @@
     if (!payload || typeof payload !== 'object') return;
     var asset = payload.asset || payload.pair || payload.symbol;
     if (!asset) return;
-    if (!shouldScanAsset(asset)) return;
+    if (!shouldScanAsset(asset)) {
+      diagnostics.historyRejectedByScan += 1;
+      return;
+    }
 
     var candles = Array.isArray(payload.candles) ? payload.candles : [];
     var history = Array.isArray(payload.history) ? payload.history : [];
+    var ingested = 0;
 
     for (var i = 0; i < candles.length; i++) {
       var cRow = candles[i];
@@ -289,6 +307,7 @@
       var cClose = rowToCandleClose(cRow);
       if (cTs && isFinite(cClose)) {
         pushHistoryPoint(String(asset), cTs * 1000, cClose);
+        ingested += 1;
       }
     }
 
@@ -299,7 +318,14 @@
       var hClose = Number(hRow[1]);
       if (hTs && isFinite(hClose)) {
         pushHistoryPoint(String(asset), hTs * 1000, hClose);
+        ingested += 1;
       }
+    }
+
+    if (ingested > 0) {
+      diagnostics.historyRowsIngested += ingested;
+      diagnostics.lastHistoryAsset = String(asset);
+      diagnostics.lastHistoryAt = Date.now();
     }
   }
 
@@ -445,10 +471,149 @@
 
   function handleTicks(ticks) {
     if (!Array.isArray(ticks) || !ticks.length) return;
+    diagnostics.extractedTicks += ticks.length;
     refreshConfig();
     for (var i = 0; i < ticks.length; i++) {
       onTick(ticks[i].asset, ticks[i].price, ticks[i].ts);
     }
+  }
+
+  function runChartProbe(params) {
+    refreshConfig();
+
+    var requestedAsset = (params && params.asset) ? String(params.asset) : '';
+    if (!requestedAsset) {
+      requestedAsset = cfg.pair || firstPairText(cfg.tradePairsList) || firstPairText(cfg.scanPairsList) || status.lastAsset || '';
+    }
+
+    var fromTs = Number(params && params.fromTs);
+    var toTs = Number(params && params.toTs);
+    if (!isFinite(fromTs)) fromTs = null;
+    if (!isFinite(toTs)) toTs = null;
+    if (fromTs !== null && toTs !== null && fromTs > toTs) {
+      var t = fromTs;
+      fromTs = toTs;
+      toTs = t;
+    }
+
+    var allAssets = Object.keys(historyByAsset);
+    var targetKey = resolveAssetKey(requestedAsset);
+    if ((!targetKey || !historyByAsset[targetKey]) && allAssets.length) {
+      targetKey = allAssets[0];
+    }
+
+    var seriesRaw = historyByAsset[targetKey] || [];
+    var inWindow = seriesRaw.filter(function keepInRange(point) {
+      if (!point) return false;
+      if (fromTs !== null && point.ts < fromTs) return false;
+      if (toTs !== null && point.ts > toTs) return false;
+      return true;
+    });
+
+    var bridgeChecks = {
+      hasBridge: !!(window.MPBWebSocketBridge && window.MPBWebSocketBridge.patched),
+      parseFailed: 0,
+      socketOpen: 0,
+      socketClose: 0,
+      socketErrors: 0
+    };
+
+    if (window.MPBWebSocketBridge && typeof window.MPBWebSocketBridge.getSocketLog === 'function') {
+      var logs = window.MPBWebSocketBridge.getSocketLog();
+      for (var i = 0; i < logs.length; i++) {
+        var ev = logs[i] && logs[i].event ? String(logs[i].event) : '';
+        if (ev === 'inbound.parse_failed') bridgeChecks.parseFailed += 1;
+        if (ev === 'socket.open') bridgeChecks.socketOpen += 1;
+        if (ev === 'socket.close') bridgeChecks.socketClose += 1;
+        if (ev === 'socket.error') bridgeChecks.socketErrors += 1;
+      }
+    }
+
+    var domChecks = {
+      canvasCount: document.querySelectorAll('canvas').length,
+      chartNodeCount: document.querySelectorAll('[id*="chart"], [class*="chart"]').length,
+      quoteNodeCount: document.querySelectorAll('[data-price], [class*="price"]').length
+    };
+
+    var chartGlobals = [];
+    var globalCandidates = ['TradingView', 'LightweightCharts', 'tvWidget', '__NUXT__'];
+    for (var j = 0; j < globalCandidates.length; j++) {
+      if (typeof window[globalCandidates[j]] !== 'undefined') {
+        chartGlobals.push(globalCandidates[j]);
+      }
+    }
+
+    var checks = [
+      {
+        id: 'bridge',
+        ok: bridgeChecks.hasBridge,
+        detail: bridgeChecks.hasBridge ? 'WebSocket bridge patched.' : 'WebSocket bridge is not available.'
+      },
+      {
+        id: 'stream_events',
+        ok: diagnostics.streamEvents > 0,
+        detail: 'Stream events seen: ' + diagnostics.streamEvents
+      },
+      {
+        id: 'history_events',
+        ok: diagnostics.historyEvents > 0,
+        detail: 'History events seen: ' + diagnostics.historyEvents
+      },
+      {
+        id: 'ticks_extracted',
+        ok: diagnostics.extractedTicks > 0,
+        detail: 'Ticks extracted from payloads: ' + diagnostics.extractedTicks
+      },
+      {
+        id: 'history_points',
+        ok: status.historyPoints > 0,
+        detail: 'History points stored: ' + status.historyPoints + ' across ' + status.historyAssets + ' assets'
+      },
+      {
+        id: 'asset_window_points',
+        ok: inWindow.length > 0,
+        detail: 'Target asset points in selected window: ' + inWindow.length
+      },
+      {
+        id: 'dom_chart_presence',
+        ok: domChecks.canvasCount > 0 || domChecks.chartNodeCount > 0,
+        detail: 'DOM chart hints: canvas=' + domChecks.canvasCount + ', chartNodes=' + domChecks.chartNodeCount + ', quoteNodes=' + domChecks.quoteNodeCount
+      }
+    ];
+
+    return {
+      requestedAsset: requestedAsset || '',
+      requestedAssetKey: assetKey(requestedAsset),
+      resolvedAsset: targetKey ? (assetLabelsByKey[targetKey] || targetKey) : '',
+      resolvedAssetKey: targetKey || '',
+      selectedFromTs: fromTs,
+      selectedToTs: toTs,
+      pointsForResolvedAsset: seriesRaw.length,
+      pointsInWindow: inWindow.length,
+      firstPointTs: seriesRaw.length ? Number(seriesRaw[0].ts) || 0 : 0,
+      lastPointTs: seriesRaw.length ? Number(seriesRaw[seriesRaw.length - 1].ts) || 0 : 0,
+      historySummary: status.historySummary.slice(),
+      chartGlobals: chartGlobals,
+      bridgeChecks: bridgeChecks,
+      diagnostics: {
+        serverEvents: diagnostics.serverEvents,
+        streamEvents: diagnostics.streamEvents,
+        historyEvents: diagnostics.historyEvents,
+        lastEventName: diagnostics.lastEventName,
+        lastEventAt: diagnostics.lastEventAt,
+        inboundParsedFrames: diagnostics.inboundParsedFrames,
+        inboundTickFrames: diagnostics.inboundTickFrames,
+        extractedTicks: diagnostics.extractedTicks,
+        historyRowsIngested: diagnostics.historyRowsIngested,
+        historyRejectedByScan: diagnostics.historyRejectedByScan,
+        lastHistoryAsset: diagnostics.lastHistoryAsset,
+        lastHistoryAt: diagnostics.lastHistoryAt
+      },
+      checks: checks,
+      overallOk: checks.some(function anyPass(item) { return item.id === 'stream_events' ? item.ok : false; }) ||
+        checks.some(function anyHistory(item) { return item.id === 'history_points' ? item.ok : false; }),
+      probedAt: Date.now()
+    };
   }
 
   function smaAt(series, endIndex, period) {
@@ -609,11 +774,17 @@
 
   market.on('server.event', function onServerEvent(ev) {
     if (!ev) return;
+    diagnostics.serverEvents += 1;
+    diagnostics.lastEventName = String(ev.eventName || ev.category || '');
+    diagnostics.lastEventAt = Date.now();
+
     if (ev.category === 'market.stream') {
+      diagnostics.streamEvents += 1;
       handleTicks(extractTicks(ev.body));
       return;
     }
     if (ev.category === 'market.history') {
+      diagnostics.historyEvents += 1;
       refreshConfig();
       ingestHistoryPayload(ev.body);
       return;
@@ -622,9 +793,11 @@
 
   if (window.MPBWebSocketBridge && typeof window.MPBWebSocketBridge.on === 'function') {
     window.MPBWebSocketBridge.on('inbound.parsed', function onBridgeParsed(ctx) {
+      diagnostics.inboundParsedFrames += 1;
       var parsed = ctx && typeof ctx.parsed !== 'undefined' ? ctx.parsed : null;
       var ticks = extractTicks(parsed);
       if (ticks.length) {
+        diagnostics.inboundTickFrames += 1;
         handleTicks(ticks);
       }
     });
@@ -643,6 +816,16 @@
         belobot: true,
         act: 'maBacktestResult',
         result: result
+      }, window.location.href);
+      return;
+    }
+
+    if (d.act === 'maChartProbeRun') {
+      var probe = runChartProbe(d.params || {});
+      window.postMessage({
+        belobot: true,
+        act: 'maChartProbeResult',
+        result: probe
       }, window.location.href);
     }
   }, true);
@@ -675,6 +858,7 @@
         historySummary: Array.isArray(status.historySummary) ? status.historySummary.slice() : []
       };
     },
+    runChartProbe: runChartProbe,
     runMarketBacktest: runMarketBacktest,
     getHistoryAssets: function getHistoryAssets() {
       return Object.keys(historyByAsset);
