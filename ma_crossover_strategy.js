@@ -761,20 +761,31 @@
     }
 
     var seriesRaw = historyByAsset[targetKey] || [];
-    var series = seriesRaw.map(function normalizePoint(point) {
+    var seriesAll = seriesRaw.map(function normalizePoint(point) {
       if (!point) return null;
       return {
         ts: normalizeEpochMs(point.ts),
         close: Number(point.close)
       };
-    }).filter(function filterTs(point) {
+    }).filter(function keepValid(point) {
+      return !!point && isFinite(point.close);
+    }).sort(function sortByTs(a, b) {
+      return a.ts - b.ts;
+    });
+
+    var series = seriesAll.filter(function filterTs(point) {
       if (!point || !isFinite(point.close)) return false;
       if (fromTs !== null && point.ts < fromTs) return false;
       if (toTs !== null && point.ts > toTs) return false;
       return true;
-    }).sort(function sortByTs(a, b) {
-      return a.ts - b.ts;
     });
+
+    var windowPoints = series.length;
+    var filterAdjusted = false;
+    if (windowPoints === 0 && seriesAll.length > 0 && (fromTs !== null || toTs !== null)) {
+      series = seriesAll.slice();
+      filterAdjusted = true;
+    }
 
     if (series.length > lookback) {
       series = series.slice(series.length - lookback);
@@ -848,6 +859,8 @@
       lookback: lookback,
       fromTs: fromTs,
       toTs: toTs,
+      windowPoints: windowPoints,
+      filterAdjusted: filterAdjusted,
       pointsUsed: series.length,
       sampleSize: sample,
       wins: wins,

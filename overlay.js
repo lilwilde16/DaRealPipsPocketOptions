@@ -971,6 +971,16 @@ function initMoneyPrinterUI() {
     var snapBtn = document.getElementById('mpb-tools-snapshot');
     var m1Btn = document.getElementById('mpb-tools-m1');
     var startStopBtn = document.getElementById('mpb-tools-startstop');
+    var amountInput = document.getElementById('mpb-tools-amount');
+
+    function syncMAAmountFromTools() {
+      var amount = Math.max(0.35, num('mpb-tools-amount', 1));
+      post('setState', {
+        settings: {
+          maAmount: amount
+        }
+      });
+    }
 
     if (queueBtn) {
       queueBtn.addEventListener('click', function () {
@@ -1038,6 +1048,11 @@ function initMoneyPrinterUI() {
         post('start_stop');
         setTimeout(refreshSnapshot, 180);
       });
+    }
+
+    if (amountInput) {
+      amountInput.addEventListener('change', syncMAAmountFromTools);
+      amountInput.addEventListener('blur', syncMAAmountFromTools);
     }
 
     if (m1Btn) {
@@ -1628,6 +1643,7 @@ function initMoneyPrinterUI() {
         '<div>Scan Pairs: <b>' + (lastMarketBacktest.scanPairs || 'all stream pairs') + '</b> | Trade Pairs: <b>' + (lastMarketBacktest.tradePairs || 'all scanned pairs') + '</b></div>' +
         '<div>Request: <b>' + (lastMarketBacktest.requestedAsset || 'n/a') + '</b> [' + (lastMarketBacktest.requestedAssetKey || 'n/a') + ']</div>' +
         '<div>Resolved: <b>' + (lastMarketBacktest.asset || 'n/a') + '</b> [' + (lastMarketBacktest.assetKey || 'n/a') + '] | MA: <b>' + lastMarketBacktest.fastPeriod + '/' + lastMarketBacktest.slowPeriod + '</b> | Points: <b>' + lastMarketBacktest.pointsUsed + '</b></div>' +
+        (lastMarketBacktest.filterAdjusted ? '<div>Date filter had 0 points; auto-used available candle range. Window points: <b>' + lastMarketBacktest.windowPoints + '</b></div>' : '') +
         '<div>Signals: <b>' + lastMarketBacktest.sampleSize + '</b> | Wins: <b>' + lastMarketBacktest.wins + '</b> | Losses: <b>' + lastMarketBacktest.losses + '</b> | Draws: <b>' + lastMarketBacktest.draws + '</b></div>' +
         '<div>Win Rate: <b>' + lastMarketBacktest.accuracy.toFixed(2) + '%</b> | PnL: <b>' + (lastMarketBacktest.pnl >= 0 ? '+' : '') + lastMarketBacktest.pnl.toFixed(2) + '</b></div>' +
         '<div>Available history assets (points): <b>' + availableText + '</b></div>';
@@ -1660,6 +1676,13 @@ function initMoneyPrinterUI() {
     var maxSteps = Math.max(1, Math.floor(Number(document.getElementById('mpb-bt-steps').value) || 2));
     var lookback = Math.max(10, Math.floor(Number(document.getElementById('mpb-bt-lookback').value) || 200));
     var timeWindow = getSelectedTimeWindow();
+
+    runtimeSettings.maAmount = baseAmount;
+    post('setState', {
+      settings: {
+        maAmount: baseAmount
+      }
+    });
 
     post('maBacktestRun', {
       params: {
@@ -2031,6 +2054,8 @@ function initMoneyPrinterUI() {
         slowPeriod: Number(d.result.slowPeriod) || runtimeSettings.maSlow,
         scanPairs: d.result.scanPairs || '',
         tradePairs: d.result.tradePairs || '',
+        filterAdjusted: !!d.result.filterAdjusted,
+        windowPoints: Number(d.result.windowPoints) || 0,
         pointsUsed: Number(d.result.pointsUsed) || 0,
         sampleSize: Number(d.result.sampleSize) || 0,
         wins: Number(d.result.wins) || 0,

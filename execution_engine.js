@@ -95,6 +95,38 @@
     return false;
   }
 
+  function updateAllExistingKeys(root, keys, value) {
+    var updates = 0;
+
+    function walk(node) {
+      if (!node || (typeof node !== 'object')) {
+        return;
+      }
+
+      if (Array.isArray(node)) {
+        for (var a = 0; a < node.length; a += 1) {
+          walk(node[a]);
+        }
+        return;
+      }
+
+      for (var i = 0; i < keys.length; i += 1) {
+        if (hasOwn(node, keys[i])) {
+          node[keys[i]] = value;
+          updates += 1;
+        }
+      }
+
+      var propKeys = Object.keys(node);
+      for (var p = 0; p < propKeys.length; p += 1) {
+        walk(node[propKeys[p]]);
+      }
+    }
+
+    walk(root);
+    return updates;
+  }
+
   function eventName(payload) {
     if (Array.isArray(payload) && typeof payload[0] === 'string') {
       return payload[0];
@@ -206,6 +238,7 @@
   function rewriteTradeRequest(payload, queuedTrade) {
     var rewritten = deepClone(payload);
     var normalizedDirection = normalizeDirection(queuedTrade.direction);
+    var normalizedAmount = Number(queuedTrade.amount);
     var targetInfo = getTradeTarget(rewritten);
     var body = targetInfo ? targetInfo.target : null;
     var touched = false;
@@ -226,17 +259,34 @@
     }
 
     setOrInsert(['asset', 'pair', 'symbol', 'instrument'], 'asset', queuedTrade.asset);
+    if (updateAllExistingKeys(rewritten, ['asset', 'pair', 'symbol', 'instrument'], queuedTrade.asset) > 0) {
+      touched = true;
+    }
 
     if (normalizedDirection) {
       setOrInsert(['action', 'direction', 'side'], 'action', normalizedDirection);
+      if (updateAllExistingKeys(rewritten, ['action', 'direction', 'side'], normalizedDirection) > 0) {
+        touched = true;
+      }
       if (normalizedDirection === 'call') {
         setOrInsert(['command'], 'command', 0);
+        if (updateAllExistingKeys(rewritten, ['command'], 0) > 0) {
+          touched = true;
+        }
       } else if (normalizedDirection === 'put') {
         setOrInsert(['command'], 'command', 1);
+        if (updateAllExistingKeys(rewritten, ['command'], 1) > 0) {
+          touched = true;
+        }
       }
     }
 
-    setOrInsert(['amount', 'sum', 'stake', 'value'], 'amount', queuedTrade.amount);
+    if (isFinite(normalizedAmount) && normalizedAmount > 0) {
+      setOrInsert(['amount', 'sum', 'stake', 'value', 'bet', 'investment'], 'amount', normalizedAmount);
+      if (updateAllExistingKeys(rewritten, ['amount', 'sum', 'stake', 'value', 'bet', 'investment'], normalizedAmount) > 0) {
+        touched = true;
+      }
+    }
 
     if (queuedTrade.mode) {
       var mode = String(queuedTrade.mode).toLowerCase();
